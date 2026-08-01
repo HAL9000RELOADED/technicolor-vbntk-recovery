@@ -18,7 +18,7 @@ from scapy.all import sniff, sendp, Ether, IP, UDP, BOOTP, DHCP, get_if_hwaddr
 
 IFACE = "Ethernet"                     # network interface facing the router
 MY_IP = "10.0.0.99"                    # this host's IP == the TFTP server IP
-CLIENT_MAC = "10:13:31:66:74:ea"       # router's MAC, as seen in BOOTREQUEST
+CLIENT_MAC = "AA:BB:CC:DD:EE:FF"       # replace with YOUR router's MAC, as seen in its BOOTREQUEST packets
 OFFERED_IP = "10.0.0.101"              # IP to hand to the router
 BOOTFILE = b"AGTEF_2.4.5_CLOSED.rbi"   # firmware filename, must exist on the TFTP server
 

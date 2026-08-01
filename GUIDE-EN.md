@@ -2,7 +2,7 @@
 
 ## Starting conditions
 
-- **Router:** ISP-provided (TIM, Italy) gateway, Technicolor VBNT-K (identifies itself via CFE as Technicolor DGA4130), Broadcom BCM63138 SoC, Linux kernel 4.1.52, OpenWrt-derived firmware with TIM branding ("AGTEF"), dual-bank signed firmware architecture.
+- **Router:** Technicolor VBNT-K (identifies itself via CFE as Technicolor DGA4130), Broadcom BCM63138 SoC, Linux kernel 4.1.52, OpenWrt-derived firmware with TIM (Italy) branding ("AGTEF"), dual-bank signed firmware architecture. The device was originally provided on loan by the ISP (to a previous holder, not this guide's author) and is now fully owned by its current holder.
 - **Original goal:** stock TIM firmware ships no VPN kernel modules. Goal: cross-compile and install `kmod-wireguard` + `kmod-tun` matching the router's exact kernel, to enable a native WireGuard tunnel (client to a VPN provider and/or "road warrior" remote-access server), without replacing the ISP firmware.
 - **Known constraints:** TIM no longer pushes firmware updates to this specific modem. No serial/UART access available going in — network only (root SSH previously obtained through a separate rooting procedure) and the router's USB port for storage.
 

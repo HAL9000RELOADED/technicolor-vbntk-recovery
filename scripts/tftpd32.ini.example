@@ -41,6 +41,7 @@ DHCP LocalIP=10.0.0.99
 Max Simultaneous Transfers=100
 UseEventLog=0
 Console Password=tftpd32
+; ^ this is Tftpd64's own built-in default console password, not a real secret
 Support for port Option=0
 Keep transfer Gui=5
 Ignore ack for last TFTP packet=0
