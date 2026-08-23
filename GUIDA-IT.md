@@ -179,6 +179,68 @@ if (pDhcpPkt->siaddr.S_un.S_addr == INADDR_NONE) {   // <-- bug: confronta con I
 
 ---
 
+## Parte E — Accesso fisico via UART
+
+La sola rete (Parte D) basta per un recovery "al buio": si vede se il router chiede BOOTP/TFTP, ma non *perché* un tentativo fallisce, né cosa succede prima o dopo — utile in un secondo momento, quando serve capire un rifiuto del bootloader o osservare l'avvio di Linux passo-passo, non solo il trasferimento del file.
+
+### Collegamento
+
+- **Hardware**: adattatore USB-seriale **Prolific PL2303** collegato ai pin UART del router (TX/RX/GND, nessun livello 5V — il PL2303 in modalità 3.3V va bene per questo SoC). Parametri: **115200 baud, 8N1**, nessun controllo di flusso.
+- **Porta COM**: assegnata da Windows al plug-in dell'adattatore (tipicamente `COM3`/`COM10` a seconda della sessione — Windows può riassegnare il numero se l'adattatore viene ricollegato). Va verificata a ogni sessione, non è fissa.
+- **Attenzione**: la console seriale resta **viva anche a Linux già avviato** — un tool che scrive sulla porta senza supervisione dopo il boot (in particolare un vero BREAK seriale, `send_break()`) può innescare il **Magic SysRq** del kernel e uccidere tutti i processi utente, facendo sembrare un boot riuscito un "blocco" misterioso. Va sempre chiaro cosa sta scrivendo sulla porta e quando smettere.
+
+### Cosa si vede
+
+Aprendo un monitor seriale a boot freddo (accensione o reset) si vede in sequenza: prima il **Boot ROM sicuro** di Broadcom (checkpoint di 4 caratteri, vedi tabella sotto), poi il banner **CFE** (bootloader vero e proprio, `HELO` + versione), poi l'inizializzazione della RAM/DDR (calibrazione timing, non richiede intervento), poi — se non si interrompe il boot — il **kernel Linux** che monta NAND/squashfs/overlay e avvia i driver (switch, WiFi Quantenna), fino a `hostapd` e al prompt di login. Se invece si interrompe il boot nel punto giusto (vedi "Cosa succede" sotto), il bootloader entra in modalità recovery di rete invece di proseguire.
+
+### Come è divisa la sequenza di boot
+
+1. **Broadcom Secure Boot ROM (BTRM)** — nel silicio, non modificabile. Verifica la catena di fiducia prima di caricare qualunque cosa da NAND. Stampa solo checkpoint di 4 caratteri (tabella sotto), nessun testo descrittivo.
+2. **CFE (Common Firmware Environment)** — il bootloader vero, si presenta con `HELO` + build (es. `4.1603-1.0.38-116.174`). Inizializza DDR/memoria, calibra i timing (le righe `Shmoo`/`ROSC`/`VDL` che si vedono sono proprio questa calibrazione), poi decide se caricare il firmware da NAND o entrare in modalità recovery.
+3. **Kernel Linux** — una volta caricata l'immagine, boot standard: mount NAND/squashfs/overlay, init driver (Runner/Flow Cache, switch, WiFi Quantenna via `wfd_bind`), fino a `hostapd` e ai servizi userspace.
+4. **Modalità recovery BOOTP/TFTP** (alternativa al punto 3) — vedi "Cosa succede".
+
+### I checkpoint del Boot ROM (BTRM)
+
+Sigle di 4 caratteri stampate dal Boot ROM sicuro durante la verifica della catena di fiducia — diagnostica di basso livello incorporata nel silicio, non testo descrittivo, e non un errore quando si vedono. Trascritte **nell'ordine esatto** osservato nei log di questa sessione, in **due blocchi distinti** separati da una riga `----`:
+
+**Blocco 1 — prima di `HELO`, verifica crittografica vera e propria (Boot ROM):**
+
+`BTRM` → `V1.6` → `PMCS` → `AFEL` → `PWRZ` → `MEML` → `PMCD` → `MEMP` → `CODE` → `ZBSS` → `MAIN` → `CACH` → `OTP?` → `OTPP` → `ROTB` → `SCBT` → `NAND` → `IMG?` → `IMGL` → `HDR?` → `HDRP` → `MCV?` → `KEY?` → `KEYA` → `MID?` → `MIDP` → `MCVA` → `SBI?` → `SBIA` → `PASS`
+
+**Blocco 2 — dopo `HELO` + versione build (es. `4.1603-1.0.38-116.174`), inizializzazione hardware di CFE per la CPU (`CPU0`):**
+
+`PMCM` → `PMCS` → `AFEL` → `PWRZ` → `MEML` → `APMT` → `PMCD` → `L1CD` → `MMUI` → `CODE` → `ZBBS` → `MAIN` → `DRAM` → ...
+
+I due blocchi condividono diverse sigle (`PMCS`, `AFEL`, `PWRZ`, `MEML`, `PMCD`, `CODE`, `MAIN`) perché **richiamano le stesse sotto-routine di basso livello** — non è un errore di trascrizione: il blocco 1 le usa durante la verifica di firma del Boot ROM, il blocco 2 le riusa per l'inizializzazione hardware di CFE, un contesto diverso. `ZBSS`/`ZBBS` e `CACH`/`L1CD` sono varianti realmente osservate in blocchi diversi, non un'alternativa arbitraria dello stesso checkpoint.
+
+Significato delle sigle con semantica chiara e non ambigua (nomi che rispecchiano direttamente un passo noto della catena di secure boot):
+
+| Checkpoint | Significato |
+|---|---|
+| `BTRM` | Boot ROM — inizio della sequenza di verifica |
+| `V1.6` | Versione del Boot ROM |
+| `OTP?` → `OTPP` | Lettura fusibili OTP (one-time-programmable) → superata |
+| `ROTB` | Root of Trust — verifica base della catena di fiducia |
+| `NAND` | Init controller NAND flash |
+| `IMG?` → `IMGL` | Ricerca immagine di boot → immagine trovata/caricata |
+| `HDR?` → `HDRP` | Lettura header immagine → header valido |
+| `KEY?` → `KEYA` | Verifica chiave di firma → chiave accettata |
+| `MID?` → `MIDP` | Controllo Market/Manufacturer ID → superato |
+| `SBI?` → `SBIA` | Verifica firma della Secure Boot Image → autenticata |
+| `PASS` | Verifica completata con successo — passa il controllo a CFE |
+| `HELO` | CFE si presenta con la propria versione — fine del Boot ROM, inizio di CFE |
+
+Le sigle rimanenti (`PMCS`/`PMCD`/`PMCM`, `AFEL`, `PWRZ`, `MEML`/`MEMP`, `CODE`, `ZBSS`/`ZBBS`, `MAIN`, `CACH`/`L1CD`, `MMUI`, `SCBT`, `MCV?`/`MCVA`, `APMT`) sono checkpoint interni di più basso livello (power management, cache, memoria, azzeramento sezioni) il cui significato esatto **non è documentato pubblicamente da Broadcom** — l'espansione (es. "Power Management Controller" per `PMC*`) è un'ipotesi plausibile dalla sigla stessa, non una conferma da fonte ufficiale.
+
+Se il **Blocco 1** non arriva a completarsi (es. si ferma su `SBI?` senza mai stampare `SBIA`/`PASS`), significa che un'immagine in NAND ha fallito la verifica crittografica del Boot ROM — un livello **più profondo e più rigido** della validazione "BLI" che fa CFE sui file ricevuti via TFTP (vedi [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md)): il Boot ROM controlla la firma sull'immagine già scritta in NAND, CFE controlla la struttura del contenitore `.rbi` ricevuto via rete prima ancora di scriverlo.
+
+### Cosa succede (trigger recovery via seriale + rete)
+
+Il bootloader CFE, durante l'avvio normale, stampa periodicamente `Market ID` seguito dal prompt "Press b to enter BOOT-P" — una finestra di pochi decimi di secondo per interromperlo. Inviando una raffica di caratteri ASCII `'b'` sulla seriale in quella finestra (niente BREAK, niente comando speciale — solo testo semplice, vedi la nota di sicurezza sopra), CFE abbandona il boot normale ed entra in **modalità BOOTP+TFTP**: manda una `BOOTREQUEST` in broadcast sull'interfaccia Ethernet e aspetta una risposta (questo è esattamente il traffico intercettato e descritto in Parte C/D). Da qui in poi la seriale serve solo a osservare i log (`TFTP started`, `File is not a valid BLI` in caso di rifiuto, oppure la sequenza di boot Linux se il file viene accettato) — il trasferimento vero del firmware passa tutto su Ethernet via TFTP, non sulla seriale.
+
+---
+
 ## Vedi anche
 
 [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) — analisi del formato `.rbi` di questi firmware (header, cifratura AES, blocco "firma") e confronto tra le versioni disponibili.
