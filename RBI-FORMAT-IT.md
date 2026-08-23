@@ -154,3 +154,138 @@ Le sezioni `public_lan` e `wan` di dropbear restano invariate (disabilitate). La
 ## 4. Changelog sequenziale per versione
 
 Vedi [`VERSION-CHANGELOG-IT.md`](VERSION-CHANGELOG-IT.md) per il dettaglio versione-per-versione (non solo aggregato) di cosa cambia tra ogni release consecutiva.
+
+## 5. Costruzione (encrypt) di un .rbi valido — verificato su hardware reale
+
+Le sezioni precedenti analizzano il formato in lettura. Qui il percorso inverso:
+costruire da zero un `.rbi` valido a partire da un'immagine raw (kernel+squashfs,
+80MB) patchata, usando solo l'OSCK pubblica (§2.1) — **senza alcuna chiave
+privata Technicolor**. Confermato funzionante sia in round-trip locale
+(decrypt→encrypt→decrypt) sia in un **flash reale** via recovery BOOTP/TFTP su
+un VBNT-K fisico (vedi §5.3).
+
+### 5.1 Algoritmo di costruzione
+
+Riassemblaggio dall'interno verso l'esterno (inverso esatto di §2):
+
+```
+b0  = 0xB0 + "MUTE" + flag(0x00) + payload_raw
+b4  = 0xB4 + "MUTE" + flag(0x00) + len(b0)_be32 + zlib.compress(b0)
+b8  = 0xB8 + "MUTE" + flag(0x00) + len(b4)_be32 + SHA256(b4)
+combined = b8 + b4     # concatenazione PIATTA, non annidamento — b8 e' solo
+                        # header+hash, il chunk b4 vero segue subito dopo nello
+                        # stream decifrato (§2.2 lo chiarisce, ma e' facile
+                        # implementarlo per errore come "cifra solo b8")
+key2, iv1, iv2 = random(32), random(16), random(16)
+enc_key2  = AES256-CBC(OSCK, iv1).encrypt(pkcs7_pad(key2))      # sempre 48 byte
+ciphertext = AES256-CBC(key2, iv2).encrypt(pkcs7_pad(combined))
+b7 = 0xB7 + "MUTE" + flag(0x00) + len(ciphertext)_be32 + iv1 + enc_key2 + iv2 + ciphertext
+
+rbi_file = header_originale[0:data_offset] + b7   # header riusato verbatim
+                                                    # da un .rbi originale dello
+                                                    # stesso modello, tranne il
+                                                    # campo data_size (0x2C)
+                                                    # aggiornato a len(b7)
+```
+
+Implementazione di riferimento (Python, pycryptodome): `encrypt_rbi.py`, non
+ancora pubblicato in questo repo — non esitate ad aprire una issue se serve
+il sorgente completo.
+
+### 5.2 Invariante non documentata: byte 0x2F / 0x178+offset_header
+
+Verificato sui 12 `.rbi` esaminati in questa fase (le 8 versioni principali
+1.0.3→2.4.5 più i 3 backup intermedi della catena hdrfix/b7fix/b8fix di
+`AGTEF_2.4.5_PATCHED.rbi` più una copia duplicata di `VBNT-K.rbi` — un
+sottoinsieme dei 14 file unici del confronto in §3): il campo `data_size`
+(0x2C, 4 byte) e il campo `counter` del chunk 0xB7 (i primi 4 byte subito
+dopo `flag`, a offset `data_offset + 6`) hanno una relazione fissa fra i
+rispettivi ultimi byte:
+
+```
+byte_finale(data_size) == byte_finale(counter_0xB7) | 0x0A
+```
+
+Es. su un file autentico: `data_size` finisce in `...4A`, il counter del
+chunk 0xB7 finisce in `...40` → `0x40 | 0x0A = 0x4A` ✓. Una costruzione
+"pulita" che calcola i due campi indipendentemente (come la formula in §5.1,
+senza questo fix) **non** soddisfa l'invariante — verificato che il file
+risultante viene comunque accettato e decifrato correttamente dal tool di
+lettura (l'invariante non è controllata lì), ma non è chiaro se sia
+controllata altrove (bootloader?), quindi lo script di riferimento la
+applica comunque per sicurezza, forzando `data_size`:
+
+```python
+full[0x2F] = full[offset_counter_0xB7_ultimo_byte] | 0x0A
+```
+
+Origine sospetta: non un vero campo di sicurezza, più probabilmente un
+artefatto di come il tool originale Technicolor deriva entrambi i campi da
+un unico valore interno con una trasformazione di maschera — non
+approfondito oltre. Nota storica: una sessione precedente aveva già
+scoperto empiricamente questa relazione riparando a mano un file cifrato con
+un editor esadecimale (da cui i nomi dei backup `.bak_pre_hdrfix`/
+`.bak_pre_b7fix`/`.bak_pre_b8fix` visti in giro nel progetto), prima che
+fosse capito il meccanismo generale qui descritto.
+
+### 5.3 Verifica su hardware reale (2026-08-23)
+
+Costruito un `.rbi` con questo schema a partire da `AGTEF_2.2.1_CLOSED.rbi`
+("221") patchato con gli stessi 3 file di §3.7 (dropbear/passwd/shadow),
+servito via recovery BOOTP/TFTP (procedura in `GUIDA-IT.md`) a un VBNT-K
+fisico. Risultato:
+
+- Router entrato in BOOT-P mode via trigger seriale automatico su
+  `Market ID`.
+- **Trasferimento TFTP completato con successo per due volte di seguito**
+  (log: `TFTP started` → `TFTP finished`, nessun errore CFE), il router ha
+  scritto e riavviato da Bank 1 entrambe le volte senza errori.
+- Boot Linux completo e pulito con l'immagine appena scritta: nessun kernel
+  panic, WiFi (Quantenna) operativo, nessun loop di riavvio. Verificato con
+  hash SHA-256 che il file effettivamente trasferito combacia byte-per-byte
+  con il `.rbi` costruito localmente.
+
+Questo è, ad oggi, la **prima conferma su hardware reale** (non solo via
+round-trip del tool di lettura) che il CFE di questo bootloader accetta un
+`.rbi` costruito interamente da zero con la sola OSCK pubblica, senza alcuna
+firma privata Technicolor — coerente con la conclusione di §2.2 ("non è
+autenticazione, è offuscamento").
+
+**Nota per chi ripete il test — timeout CFE -21**: nei primi tentativi (due
+sessioni diverse, file diversi) il trasferimento falliva sempre con
+`Loading failed.: CFE error -21` dopo un tempo costante (~8.5s,
+indipendente dalla dimensione del file). Verificato nel sorgente Broadcom
+originale (`cfe_error.h`, repo `Noltari/cfe_bcm63xx`): **-21 =
+`CFE_ERR_TIMEOUT`**, non un rifiuto di validazione. Causa reale: **Windows
+Firewall blocca di default il traffico UDP in ingresso sulla porta 69** per
+processi senza una regola esplicita (il traffico BOOTP passa comunque perché
+cattura/invia a livello driver via scapy/Npcap, bypassando il firewall — il
+TFTP invece usa un socket UDP standard, bloccato). Fix:
+
+```powershell
+New-NetFirewallRule -DisplayName "TFTP recovery" -Direction Inbound -Protocol UDP -LocalPort 69 -Action Allow -Profile Private
+```
+
+**Problema aperto, non ancora risolto**: dopo il flash riuscito (confermato
+dal log seriale e dall'hash), il login SSH `root`/`root` sulla nuova
+immagine **continua a fallire** ("Permission denied (password)"), nonostante
+l'hash in `/etc/shadow` sia verificato correttamente in locale prima del
+flash. Contestualmente, la webUI mostra un sintomo distinto ma forse
+correlato — vedi **[`WEBUI-LUA-ISSUE-IT.md`](WEBUI-LUA-ISSUE-IT.md)** per
+l'analisi completa (motore Lua attivo ma template renderizzati come testo
+grezzo invece che eseguiti). Ipotesi principale sulla parte SSH, non ancora
+verificata: questi sistemi montano lo squashfs in sola lettura con un
+**overlay scrivibile persistente** (altra partizione, non toccata dal flash
+BOOTP/TFTP, che copre solo kernel+rootfs — vedi
+[`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md)) per `/etc` — se una
+versione precedente dei file (da un tentativo di rooting precedente su
+questo stesso router) è già stata scritta nell'overlay, questa oscura le
+modifiche fatte nello squashfs indipendentemente da cosa contenga l'immagine
+appena flashata. Da verificare con un vero factory-reset (7 secondi sul
+tasto reset **a router già acceso**, procedura diversa dal
+power-on-con-reset-premuto usato per la recovery BOOTP) per svuotare
+l'overlay — **primo tentativo (2026-08-23) inconcludente**: lo stesso
+identico hard-reset era già stato provato in passato su questo router per un
+problema diverso (§10.1 della documentazione di recovery locale, non ancora
+pubblicata qui) senza risolverlo, quindi non è garantito che svuoti davvero
+`rootfs_data` su questo hardware.
