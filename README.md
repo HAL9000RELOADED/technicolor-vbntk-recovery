@@ -10,6 +10,8 @@
 - [`GUIDE-EN.md`](GUIDE-EN.md) — full step-by-step guide in English (build + firmware recovery)
 - [`GUIDA-ROOT-IT.md`](GUIDA-ROOT-IT.md) — seguito: tentativo di rooting (fallito, patchato) + ripristino configurazione (riuscito)
 - [`GUIDE-ROOT-EN.md`](GUIDE-ROOT-EN.md) — follow-on: rooting attempt (failed, patched) + configuration restore (succeeded)
+- [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) — analisi del formato `.rbi` (header, cifratura AES, blocco "firma") + confronto reale 1.0.3 vs 1.1.3 vs 2.4.5 patchata
+- [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) — `.rbi` container format analysis (header, AES encryption, "signature" block) + real 1.0.3 vs 1.1.3 vs patched 2.4.5 comparison
 
 ## Contents / Contenuto
 
