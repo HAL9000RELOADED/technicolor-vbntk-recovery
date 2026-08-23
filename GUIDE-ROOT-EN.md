@@ -70,3 +70,5 @@ followed by the router rebooting on its own (~1 minute) to apply the imported co
 ## Also see
 
 [`GUIDE-EN.md`](GUIDE-EN.md) — the firmware recovery guide that precedes this rooting attempt.
+
+[`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) — analysis of the `.rbi` format used by these firmware images (header, AES encryption, "signature" block) and a comparison across the available versions.

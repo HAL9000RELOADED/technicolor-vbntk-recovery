@@ -70,3 +70,5 @@ seguita da un riavvio automatico del modem (~1 minuto) per applicare la configur
 ## Vedi anche
 
 [`GUIDA-IT.md`](GUIDA-IT.md) — la guida di recovery firmware che precede questo tentativo di rooting.
+
+[`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) — analisi del formato `.rbi` usato da questi firmware (header, cifratura AES, blocco "firma") e confronto tra le versioni disponibili.

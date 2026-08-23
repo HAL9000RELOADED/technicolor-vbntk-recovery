@@ -179,6 +179,10 @@ if (pDhcpPkt->siaddr.S_un.S_addr == INADDR_NONE) {   // <-- bug: confronta con I
 
 ---
 
+## Vedi anche
+
+[`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) — analisi del formato `.rbi` di questi firmware (header, cifratura AES, blocco "firma") e confronto tra le versioni disponibili.
+
 ## Strumenti e riferimenti usati
 
 - [Documentazione hack-technicolor — Recovery](https://hack-technicolor.readthedocs.io/en/stable/Recovery/)
