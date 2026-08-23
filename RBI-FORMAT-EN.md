@@ -161,3 +161,132 @@ The `public_lan` and `wan` dropbear sections are left untouched (still disabled)
 ## 4. Sequential per-version changelog
 
 See [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) for a version-by-version (not just aggregate) breakdown of what changed between each consecutive release.
+
+## 5. Building (encrypting) a valid .rbi — verified on real hardware
+
+The previous sections analyze the format from the reading side. Here is the
+reverse path: building a valid `.rbi` from scratch out of a patched raw image
+(kernel+squashfs, 80MB), using only the public OSCK (§2.1) — **with no
+Technicolor private key at all**. Confirmed working both in a local round-trip
+(decrypt→encrypt→decrypt) and in a **real flash** via BOOTP/TFTP recovery on
+physical VBNT-K hardware (see §5.3).
+
+### 5.1 Build algorithm
+
+Reassembly from the inside out (exact inverse of §2):
+
+```
+b0  = 0xB0 + "MUTE" + flag(0x00) + payload_raw
+b4  = 0xB4 + "MUTE" + flag(0x00) + len(b0)_be32 + zlib.compress(b0)
+b8  = 0xB8 + "MUTE" + flag(0x00) + len(b4)_be32 + SHA256(b4)
+combined = b8 + b4     # FLAT concatenation, not nesting — b8 is only a
+                        # header+hash; the real b4 chunk follows right after
+                        # it in the decrypted stream (§2.2 explains this, but
+                        # it's an easy mistake to encrypt only b8)
+key2, iv1, iv2 = random(32), random(16), random(16)
+enc_key2  = AES256-CBC(OSCK, iv1).encrypt(pkcs7_pad(key2))      # always 48 bytes
+ciphertext = AES256-CBC(key2, iv2).encrypt(pkcs7_pad(combined))
+b7 = 0xB7 + "MUTE" + flag(0x00) + len(ciphertext)_be32 + iv1 + enc_key2 + iv2 + ciphertext
+
+rbi_file = original_header[0:data_offset] + b7   # header reused verbatim from
+                                                   # an original .rbi for the
+                                                   # same board, except the
+                                                   # data_size field (0x2C)
+                                                   # updated to len(b7)
+```
+
+Reference implementation (Python, pycryptodome): `encrypt_rbi.py`, not yet
+published in this repo — feel free to open an issue if the full source is
+needed.
+
+### 5.2 Undocumented invariant: byte 0x2F / 0x178+header_offset
+
+Verified across the 12 `.rbi` files examined in this pass (the 8 primary
+1.0.3→2.4.5 versions plus the 3 intermediate hdrfix/b7fix/b8fix backups of
+`AGTEF_2.4.5_PATCHED.rbi` plus one duplicate `VBNT-K.rbi` copy — a subset of
+the 14 unique files compared in §3): the `data_size` field (0x2C, 4 bytes) and the `counter`
+field of the 0xB7 chunk (the first 4 bytes right after `flag`, at offset
+`data_offset + 6`) have a fixed relationship between their respective last
+bytes:
+
+```
+last_byte(data_size) == last_byte(counter_0xB7) | 0x0A
+```
+
+E.g. on an authentic file: `data_size` ends in `...4A`, the 0xB7 chunk's
+counter ends in `...40` → `0x40 | 0x0A = 0x4A` ✓. A "clean" build that
+computes both fields independently (as in the §5.1 formula, without this fix)
+does **not** satisfy the invariant — verified that the resulting file is
+still accepted and correctly decrypted by the reading tool (the invariant
+isn't checked there), but it's unclear whether it's checked elsewhere (the
+bootloader?), so the reference script applies it anyway for safety, forcing
+`data_size`:
+
+```python
+full[0x2F] = full[offset_of_0xB7_counter_last_byte] | 0x0A
+```
+
+Suspected origin: probably not a real security field, more likely an
+artifact of how the original Technicolor tool derives both fields from a
+single internal value via a masking transform — not investigated further.
+Historical note: an earlier session had already discovered this relationship
+empirically by hand-repairing an encrypted file with a hex editor (hence the
+`.bak_pre_hdrfix`/`.bak_pre_b7fix`/`.bak_pre_b8fix` backup names seen around
+the project), before the general mechanism described here was understood.
+
+### 5.3 Real-hardware verification (2026-08-23)
+
+Built a `.rbi` with this scheme starting from `AGTEF_2.2.1_CLOSED.rbi`
+("221") patched with the same 3 files from §3.7 (dropbear/passwd/shadow),
+served via BOOTP/TFTP recovery (procedure in `GUIDE-EN.md`) to a physical
+VBNT-K. Result:
+
+- Router entered BOOT-P mode via the automatic serial trigger on
+  `Market ID`.
+- **TFTP transfer completed successfully twice in a row** (log:
+  `TFTP started` → `TFTP finished`, no CFE error), the router wrote and
+  rebooted from Bank 1 both times with no errors.
+- Clean, complete Linux boot with the freshly-written image: no kernel
+  panic, WiFi (Quantenna) operational, no reboot loop.
+
+This is, as of now, the **first real-hardware confirmation** (not just a
+round-trip through the reading tool) that this bootloader's CFE accepts a
+`.rbi` built entirely from scratch with only the public OSCK, with no
+Technicolor private signature — consistent with §2.2's conclusion
+("obfuscation, not authentication").
+
+**Note for anyone repeating the test — CFE timeout -21**: in the first
+attempts (two different sessions, different files) the transfer always
+failed with `Loading failed.: CFE error -21` after a constant time (~8.5s,
+independent of file size). Verified against the original Broadcom source
+(`cfe_error.h`, `Noltari/cfe_bcm63xx` repo): **-21 = `CFE_ERR_TIMEOUT`**, not
+a validation rejection. Real cause: **Windows Firewall blocks inbound UDP
+traffic on port 69 by default** for processes without an explicit rule (the
+BOOTP traffic still gets through because it's captured/sent at the driver
+level via scapy/Npcap, bypassing the firewall — TFTP instead uses a standard
+UDP socket, which gets blocked). Fix:
+
+```powershell
+New-NetFirewallRule -DisplayName "TFTP recovery" -Direction Inbound -Protocol UDP -LocalPort 69 -Action Allow -Profile Private
+```
+
+**Open problem, not yet resolved**: after a confirmed-successful flash (per
+the serial log), SSH login with `root`/`root` on the new image **still
+fails** ("Permission denied (password)"), even though the `/etc/shadow` hash
+was verified correct locally before flashing. Leading hypothesis, not yet
+confirmed: these systems mount the squashfs read-only with a **persistent
+writable overlay** (a separate partition, untouched by the BOOTP/TFTP flash,
+which only covers kernel+rootfs) for `/etc` — if an earlier version of these
+files (from a previous rooting attempt on this same router) was already
+written into the overlay, it shadows whatever changes are made in the
+squashfs, regardless of what the freshly-flashed image contains. To be
+verified with a genuine factory reset (7 seconds on the reset button
+**while the router is already powered on and booted**, a different procedure
+from the power-on-with-reset-held used for BOOTP recovery) to clear the
+overlay. Not confirmed as of this writing. A parallel session also reports
+that flashing `AGTEF_1.0.3` via this same BOOTP/TFTP path produces the same
+"webUI serves raw, unexecuted Lua" symptom (not yet documented in this repo)
+— now reproduced with `221` too, which suggests the
+symptom may depend on the recovery **procedure** itself (something not
+re-initialized on first boot after a flash via this path) rather than on the
+specific firmware version's content.

@@ -14,6 +14,8 @@
 - [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) — `.rbi` container format analysis (header, AES encryption, "signature" block) + comparison across all 14 available versions
 - [`VERSION-CHANGELOG-IT.md`](VERSION-CHANGELOG-IT.md) — changelog sequenziale versione-per-versione (1.0.3 → 2.4.5_PATCHED), incluso il contenuto esatto della patch di rooting
 - [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) — sequential version-by-version changelog (1.0.3 → 2.4.5_PATCHED), including the exact content of the rooting patch
+- [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) — layout NAND, tabella partizioni MTD, sistema dual-bank e overlay persistente `/etc`
+- [`MEMORY-ARCHITECTURE-EN.md`](MEMORY-ARCHITECTURE-EN.md) — NAND layout, MTD partition table, dual-bank system, and persistent `/etc` overlay
 
 ## Contents / Contenuto
 
