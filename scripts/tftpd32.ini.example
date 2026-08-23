@@ -1,0 +1,48 @@
+; Working Tftpd64 config used for TFTP-only recovery serving.
+; Place next to tftpd64.exe (portable edition). BaseDirectory should point
+; at the folder containing your firmware .rbi file.
+;
+; DHCP server is intentionally left OFF (Services=1, TFTP server only) --
+; use scripts/bootp_responder.py alongside this to handle the BOOTP
+; handshake correctly (see the guide for why Tftpd64's own DHCP/BOOTP
+; server can't be used as-is for this recovery mode).
+
+[DHCP]
+Lease_NumLeases=0
+
+[TFTPD32]
+BaseDirectory=.
+TftpPort=69
+Hide=0
+WinSize=0
+Negociate=1
+PXECompatibility=0
+DirText=0
+ShowProgressBar=1
+Timeout=3
+MaxRetransmit=6
+SecurityLevel=1
+UnixStrings=1
+Beep=0
+VirtualRoot=0
+MD5=0
+LocalIP=10.0.0.99
+Services=1
+TftpLogFile=tftpd64.log
+SaveSyslogFile=
+PipeSyslogMsg=0
+LowestUDPPort=0
+HighestUDPPort=0
+MulticastPort=0
+MulticastAddress=
+PersistantLeases=1
+DHCP Ping=1
+DHCP LocalIP=10.0.0.99
+Max Simultaneous Transfers=100
+UseEventLog=0
+Console Password=tftpd32
+; ^ this is Tftpd64's own built-in default console password, not a real secret
+Support for port Option=0
+Keep transfer Gui=5
+Ignore ack for last TFTP packet=0
+Enable IPv6=0
