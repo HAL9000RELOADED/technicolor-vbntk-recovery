@@ -1,6 +1,6 @@
 # Changelog sequenziale AGTEF (VBNT-K / DGA0130TCH)
 
-Cosa cambia, versione dopo versione, tra le 13 immagini `.rbi` uniche trovate in cartella — in ordine di numero di versione (non necessariamente ordine di rilascio reale). Metodologia e dettagli sul formato in [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md); qui il focus è sul delta file-per-file tra ogni coppia consecutiva.
+Cosa cambia, versione dopo versione, tra le 15 immagini `.rbi` uniche trovate in cartella — in ordine di numero di versione (non necessariamente ordine di rilascio reale). Metodologia e dettagli sul formato in [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md); qui il focus è sul delta file-per-file tra ogni coppia consecutiva.
 
 **Nota sul rumore "busybox":** in quasi ogni transizione, decine di file sotto `bin/` (`ash`, `busybox`, `cat`, `grep`, `ls`, ...) risultano "modificati". Sono quasi tutti symlink allo stesso binario BusyBox: quando BusyBox viene ricompilato (anche senza cambiare funzionalità), ogni link mostra contenuto diverso. Questi conteggi sono inclusi nei totali qui sotto ma **non vengono elencati singolarmente** — l'attenzione va ai file con nome esplicito.
 
@@ -32,9 +32,13 @@ Cosa cambia, versione dopo versione, tra le 13 immagini `.rbi` uniche trovate in
 
 **0 rimossi, 3 aggiunti, 759 modificati.** Simile a `1.2.0_001 → 2.0.0`: quasi tutto ricompilazione, nessuna rimozione.
 
-## 2.0.1_003 → 2.2.0 — salto di generazione kernel
+## 2.0.1_003 → 2.0.1
 
-**214 rimossi, 614 aggiunti, 2222 modificati.** **Kernel `3.4.11` → `4.1.38`** — la prima vera transizione di generazione della linea. Compare `lxc` (supporto container). Le board supportate salgono da 2 (`VBNT-K`, `VBNT-S`) a 5 (+ `VANT-W`, `VBNT-F`, `VBNT-H`).
+**0 rimossi, 0 aggiunti, 3 modificati.** Il delta più piccolo possibile: solo `etc/banner`, `etc/config/version` e `etc/uci-defaults/tch_5000_versioncusto` — puro bump di stringa di versione, nessun cambio funzionale.
+
+## 2.0.1 → 2.2.0 — salto di generazione kernel
+
+**437 rimossi, 1627 aggiunti, 2224 modificati.** **Kernel `3.4.11` → `4.1.38`** — la prima vera transizione di generazione della linea. Compare `lxc` (supporto container), `mqttjson-services`/`mmpbxd_lite`/`mmpbxfwctl`/`bulkdata`/`bcm_spdsvc`/`kmodparams`/`nqe`/`opticald`. Le board supportate salgono da 2 (`VBNT-K`, `VBNT-S`) a 5 (+ `VANT-W`, `VBNT-F`, `VBNT-H`) — da qui gran parte dei 1627 aggiunti (asset per-board sotto `etc/boards/<NOME>/`, uno per board). **Rimossi qui, non nella transizione successiva come si potrebbe pensare**: `telnet` (init.d + rc.d), `samba`/`samba-nmbd` (init.d + rc.d + `etc/samba/`), `datausaged`, `sfpmon`. Anche le librerie C uClibc "vecchio schema" (`ld-uClibc-0.9.33.2.so`, `libc.so.0`, ecc.) spariscono qui — coerente con l'inizio della migrazione verso glibc completata in questa stessa versione.
 
 ## 2.2.0 → 2.2.1
 
@@ -48,8 +52,12 @@ Cosa cambia, versione dopo versione, tra le 13 immagini `.rbi` uniche trovate in
 
 **15 rimossi, 104 aggiunti, 1270 modificati.** Stesso kernel (`4.1.52`), stesse 18 board — un aggiornamento incrementale sulla stessa base architetturale, non un altro salto di generazione.
 
-## 2.4.1 → 2.4.5
+## 2.4.1 → 2.4.4
 
-**0 rimossi, 4 aggiunti, 23 modificati.** Delta piccolo e pulito, nessun rumore busybox (solo `bin/ps` tra i binari). File nuovi: due certificati (`etc/ssl/certs/4ec17c6c.0`, `etc/ssl/certs/TimGroupPrivateRootCA.b64.cer` — TIM aggiunge la propria CA privata), `lib/mount_root/00_overlay_threshold_check` e `usr/sbin/mon_reinit.sh`. Modificati: `etc/banner`, `etc/config/cwmpd`, `etc/config/version`, `etc/init.d/wireless` + `etc/rc.d/S13wireless`, quattro `etc/uci-defaults/tch_*` (rete WAN, rimozioni, versioning, profilo "LTE 2 Box"), `usr/bin/bulkdata`, mapping WiFi/MultiAP/host (`transformer/shared/wifi.lua`, `web/content_helper.lua`, vari `.map` BBF/device2/rpc) e `www/docroot/modals/system-info-modal.lp`. Un aggiornamento mirato su gestione WiFi/MultiAP, CWMP e certificati — non tocca la configurazione di sicurezza (dropbear/passwd/shadow restano quelli di `2.4.1`, entrambi con SSH disabilitato).
+**0 rimossi, 1 aggiunto, 4 modificati.** Delta minimo. Nuovo: `lib/mount_root/00_overlay_threshold_check` (script legato alla gestione dello spazio overlay/jffs2 — verifica una soglia prima del mount, coerente con l'architettura a bank+overlay separato documentata in `RBI-FORMAT-IT.md`). Modificati: `etc/banner`, `etc/config/version`, `etc/uci-defaults/tch_5000_versioncusto` (bump versione) e `usr/bin/bulkdata`.
+
+## 2.4.4 → 2.4.5
+
+**0 rimossi, 3 aggiunti, 24 modificati.** Nessun rumore busybox (solo `bin/ps` tra i binari). File nuovi: due certificati (`etc/ssl/certs/4ec17c6c.0`, `etc/ssl/certs/TimGroupPrivateRootCA.b64.cer` — TIM aggiunge la propria CA privata) e `usr/sbin/mon_reinit.sh`. Modificati: `etc/banner`, `etc/config/cwmpd`, `etc/config/version`, `etc/init.d/wireless` + `etc/rc.d/S13wireless`, quattro `etc/uci-defaults/tch_*` (rete WAN, rimozioni, versioning, profilo "LTE 2 Box"), `usr/bin/bulkdata`, mapping WiFi/MultiAP/host (`transformer/shared/wifi.lua`, `web/content_helper.lua`, vari `.map` BBF/device2/rpc) e `www/docroot/modals/system-info-modal.lp`. Un aggiornamento mirato su gestione WiFi/MultiAP, CWMP e certificati — non tocca la configurazione di sicurezza (dropbear/passwd/shadow restano quelli di `2.4.1`/`2.4.4`, entrambi con SSH disabilitato).
 
 Dettagli completi e verifica del meccanismo di firma in [`RBI-FORMAT-IT.md` §3.7](RBI-FORMAT-IT.md#37-245-closed-vs-patched).
