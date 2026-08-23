@@ -222,11 +222,7 @@ full[0x2F] = full[offset_counter_0xB7_ultimo_byte] | 0x0A
 Origine sospetta: non un vero campo di sicurezza, più probabilmente un
 artefatto di come il tool originale Technicolor deriva entrambi i campi da
 un unico valore interno con una trasformazione di maschera — non
-approfondito oltre. Nota storica: una sessione precedente aveva già
-scoperto empiricamente questa relazione riparando a mano un file cifrato con
-un editor esadecimale (da cui i nomi dei backup `.bak_pre_hdrfix`/
-`.bak_pre_b7fix`/`.bak_pre_b8fix` visti in giro nel progetto), prima che
-fosse capito il meccanismo generale qui descritto.
+approfondito oltre.
 
 ### 5.3 Verifica su hardware reale (2026-08-23)
 
