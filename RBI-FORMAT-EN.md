@@ -81,19 +81,83 @@ Verification across the 4 files (declared header hash vs. hash recomputed on the
 
 `0xB4`: `magic(1) + "MUTE"(4) + flag(1) + counter(4) + zlib_data`. `0xB0`: `magic(1) + "MUTE"(4) + flag(1) + plaintext_payload` — the final flash image, 80 MB (`0x5000000`) across all files tested.
 
-## 3. Real comparison between firmware versions
+## 3. Real comparison across all available firmware versions
 
-### 1.0.3 vs 1.1.3
+Analysis extended to all **14 unique images** found in the folder (deduplicated by MD5 — `*_copy.rbi` files are byte-for-byte duplicates, excluded): `1.0.3`, `1.0.4`, `1.1.2`, `1.1.3`, `1.2.0_001`, `2.0.0`, `2.0.0_002`, `2.0.1_003`, `2.2.0`, `2.2.1`, `2.3.2`, `2.4.1`, `2.4.5`, `2.4.5_PATCHED`. Rootfs extracted natively in WSL (ext4, case-sensitive) — extracting on a case-insensitive Windows/DrvFs filesystem silently drops files that differ only by case, so always re-check on a case-sensitive filesystem before drawing conclusions from a `diff -rq`.
 
-Rootfs extracted natively (caveat: extracting on a case-insensitive Windows/DrvFs filesystem silently drops files that differ only by case — always re-check on a case-sensitive filesystem before drawing conclusions from a `diff -rq`).
+### 3.1 Signature check — universal across all 14
 
-Real differences (not extraction artifacts):
+The byte-for-byte check described in §2.2 (`0xB8` hash == `SHA-256` of the following `0xB4` chunk) was repeated across all 14 images, patch included: **positive match on every single one**, no exceptions. This definitively confirms the mechanism was never a private-key signature in any observed version of the AGTEF line.
 
-- **`etc/config/dropbear`**: `1.0.3` ships with SSH disabled by default (`enable '0'`, `RootPasswordAuth off`); `1.1.3` ships it **enabled** (`enable '1'`, `RootPasswordAuth on`, `RootLogin '1'`).
-- **`etc/inittab`**: `1.0.3` has the serial console commented out (`#::askconsole:/bin/login`); `1.1.3` has it **active with no login** (`::askconsole:/bin/ash` — direct shell over UART, no authentication).
-- Kernel modules (`3.4.11`, `3.4.11-rt19`) are identical in both versions.
-- A few placeholder files (`etc/fstab`, `etc/mtab`, `etc/resolv.conf`, `etc/TZ`, `etc/snmp/snmpd.conf`) exist only in `1.1.3` — likely OpenWrt build/overlay markers, not necessarily meaningful firmware payload.
+### 3.2 SSH (dropbear) — evolution over time
 
-### 2.4.5 CLOSED vs PATCHED
+| Version | Config structure | `enable` (lan) | `RootPasswordAuth` | `RootLogin` |
+|---|---|---|---|---|
+| 1.0.3 | single instance | `0` | `off` | — |
+| 1.0.4 → 2.0.1_003 | `lan` + `wan` | `0` / `0` | `on` (but disabled) | — |
+| **1.1.3** | **single instance** | **`1`** | **`on`** | **`1`** |
+| 2.2.0 / 2.2.1 | `lan` + `public_lan` + `wan` | `0` / `0` / `0` | `on` | `0` (public_lan/wan) |
+| 2.3.2 / 2.4.1 / 2.4.5 | `lan` + `public_lan` + `wan` | `0` / `0` / `0` | `0` (numeric, tightened) | `0` |
 
-Identical container structure (`0xB7→0xB8→0xB4→0xB0`), identical static `0x104`-byte blob, different `0xB8` hash but **internally consistent** with its own payload in both cases (see table above) — the patched rebuild is structurally indistinguishable from an "original" file with respect to this verification mechanism.
+Key points:
+
+- **`1.1.3` is a clear outlier**: the only version, across the whole line, with a single-instance config structure (matching only `1.0.3`'s style — not the adjacent `1.1.2`/`1.2.0_001` releases, which already use the `lan`+`wan` scheme) **and** root SSH enabled out of the box. It also lacks the `etc/boards/` folder entirely (also missing in `1.0.3`, but present in every other version from `1.0.4` onward), and has no `mosquitto` installed. All of this points to `AGTEF_1.1.3_CLOSED.rbi` not being a standard public TIM release, but plausibly a lab/debug image — handle with caution if used for a real downgrade.
+- **From `2.3.2` through `2.4.5`, stock ships SSH fully disabled** on all three interfaces, with root's shell set to `/bin/restricted_shell` (not a full shell) — consistent with the hardening trend that started at `2.3.2`. Methodological caveat: a first extraction of `2.4.1`/`2.4.5` from this local repository turned out to be contaminated by an earlier rooting attempt (`patch_241.sh`/`patch_245.sh`, run **in-place** on the very folder used as the "stock" reference) — the correct values above come from a clean re-extraction, straight from the original `.rbi` files, not from reused working folders. See §3.7 for what the patch actually changes.
+
+### 3.3 Serial console (`etc/inittab`, `askconsole` line)
+
+| Version | `askconsole` line |
+|---|---|
+| 1.0.3 | `#::askconsole:/bin/login` (disabled) |
+| 1.0.4 → 2.0.1_003 | `#::askconsolelate:/bin/login` (disabled, entry renamed) |
+| **1.1.3** | **`::askconsole:/bin/ash`** (**active, no login**) |
+| 2.3.2 → 2.4.5_PATCHED | `#::askconsole:/bin/restricted_shell` (disabled, but now points at a restricted shell instead of `/bin/login`) |
+
+Only `1.1.3` has the console genuinely active with no authentication — consistent with the lab-build hypothesis.
+
+### 3.4 Kernel and supported boards
+
+| Version | Kernel | Boards in `etc/boards/` |
+|---|---|---|
+| 1.0.3 → 2.0.1_003 | `3.4.11` (+ `3.4.11-rt19`) | 2 (`VBNT-K`, `VBNT-S`) — missing in 1.0.3/1.1.3 |
+| 2.2.0 / 2.2.1 | `4.1.38` | 5 (+ `VANT-W`, `VBNT-F`, `VBNT-H`) |
+| 2.3.2 → 2.4.5_PATCHED | `4.1.52` | **18** (`VANT-W`, `VBNT-6/7/9/H/J/K/O/S/V/Y`, `VCNT-A/C/E/H/I/X/Z`) |
+
+Two clear jumps: the kernel generation change `3.4.11 → 4.1.38` at `2.2.0`, and the large multi-board consolidation (from 5 to 18 Technicolor variants covered by a single image) starting at `2.3.2`.
+
+### 3.5 Features over time
+
+| Version | mosquitto (MQTT) | lxc (containers) | wireguard | openvpn |
+|---|---|---|---|---|
+| 1.0.3 / 1.0.4 | ❌ | ❌ | ❌ | ❌ |
+| 1.1.2 → 2.0.1_003 | ✅ | ❌ | ❌ | ❌ |
+| 1.1.3 | ❌ *(outlier here too)* | ❌ | ❌ | ❌ |
+| 2.2.0 → 2.4.5_PATCHED | ✅ | ✅ | ❌ | ❌ |
+
+**WireGuard is never present in any stock release**, across all 14 versions analyzed — consistent with why this repository had to cross-compile a custom WireGuard kernel module (see [`GUIDE-EN.md`](GUIDE-EN.md)) instead of enabling one already shipped.
+
+### 3.6 Total file count (complexity proxy)
+
+`1.0.3`=4255, `1.0.4`=4494, `1.1.2`=4781, `1.1.3`=4255, `1.2.0_001`=4781, `2.0.0`=4789, `2.0.0_002`=4787, `2.0.1_003`=4790, `2.2.0`=6114, `2.2.1`=6178, `2.3.2`=**13112**, `2.4.1`=8011, `2.4.5`=8015, `2.4.5_PATCHED`=8015.
+
+The peak at `2.3.2` (almost double `2.4.1`) coincides with the 18-board consolidation — likely per-board assets not yet merged, later reorganized/pruned in `2.4.x`.
+
+### 3.7 2.4.5 CLOSED vs PATCHED
+
+Identical container structure (`0xB7→0xB8→0xB4→0xB0`), identical static `0x104`-byte blob, different `0xB8` hash but **internally consistent** with its own payload in both cases (see §3.1) — the patched rebuild is structurally indistinguishable from an "original" file with respect to this verification mechanism.
+
+At the rootfs level, comparing a clean re-extraction of `2.4.5` (straight from the original `.rbi`) against `2.4.5_PATCHED`, **exactly 3 files change** — nothing else:
+
+| File | Stock 2.4.5 | Patched |
+|---|---|---|
+| `etc/passwd` (root line) | `root:x:0:0:root:/root:/bin/restricted_shell` | `root:x:0:0:root:/root:/bin/ash` |
+| `etc/shadow` (root line) | `root:*:0:0:99999:7:::` (no password, locked account) | `root:$6$<salt>$<hash>:0:0:99999:7:::` (a known password set, sha512crypt hash) |
+| `etc/config/dropbear` (`lan` section) | `enable '0'`, `RootLogin '0'`, `RootPasswordAuth '0'`, `AllowLocalForwarding '0'` | `enable '1'`, `RootLogin '1'`, `RootPasswordAuth '1'`, `AllowLocalForwarding '1'` |
+
+The `public_lan` and `wan` dropbear sections are left untouched (still disabled). The patch is therefore narrow and minimal: it swaps root's shell for a full one, sets a known root password, and enables root-login SSH on the LAN interface only — nothing else in the filesystem is touched.
+
+**Important methodological note:** an earlier pass at this analysis, based on working folders reused from a prior rooting attempt in this same local repository, wrongly showed "0 differences" between `2.4.5` and `2.4.5_PATCHED` — because the folder used as the "stock" reference had already been patched **in-place** by the rooting script itself (`patch_245.sh`), which edits `/etc/passwd`, `/etc/shadow` and `/etc/config/dropbear` directly in the source folder before a separate script (`rebuild_245.sh`) repacks it into a new `.rbi`. Lesson: whenever a folder may have been used as the source for a rebuild/patch, always re-extract it fresh from the original `.rbi` before using it as a "stock" baseline — don't trust recycled working folders.
+
+## 4. Sequential per-version changelog
+
+See [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) for a version-by-version (not just aggregate) breakdown of what changed between each consecutive release.
