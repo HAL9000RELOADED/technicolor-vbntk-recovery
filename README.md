@@ -14,6 +14,10 @@
 - [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) — `.rbi` container format analysis (header, AES encryption, "signature" block) + comparison across all 14 available versions
 - [`VERSION-CHANGELOG-IT.md`](VERSION-CHANGELOG-IT.md) — changelog sequenziale versione-per-versione (1.0.3 → 2.4.5_PATCHED), incluso il contenuto esatto della patch di rooting
 - [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) — sequential version-by-version changelog (1.0.3 → 2.4.5_PATCHED), including the exact content of the rooting patch
+- [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) — layout NAND, partizioni MTD, sistema dual-bank, datasheet SoC/NAND
+- [`MEMORY-ARCHITECTURE-EN.md`](MEMORY-ARCHITECTURE-EN.md) — NAND layout, MTD partitions, dual-bank system, SoC/NAND datasheet
+- [`UART-BOOT-LOG-IT.md`](UART-BOOT-LOG-IT.md) — trascrizione commentata di un boot seriale reale (Boot ROM, CFE, kernel Linux, recovery BOOTP/TFTP) con spiegazione dei checkpoint a 4 caratteri
+- [`UART-BOOT-LOG-EN.md`](UART-BOOT-LOG-EN.md) — annotated transcript of a real serial boot (Boot ROM, CFE, Linux kernel, BOOTP/TFTP recovery) with the 4-character checkpoints explained
 
 ## Contents / Contenuto
 

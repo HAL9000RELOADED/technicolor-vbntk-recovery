@@ -12,6 +12,60 @@ documentazione ufficiale — log completo raccolto il 2026-08-23.
 - Flash: NAND **256MB**, chip **Micron MT29F2G08ABA** (`mfg 2c da`, `dev_id=2cda9095`), block size **128K**, writesize 2048, ECC BCH4 (2K)
 - Bootloader: CFE, "Boot Loader Version" tipica `16.11.1013-...`, board mnemonic `VBNT-K`
 
+### 1.1 Datasheet — SoC Broadcom BCM63138B0
+
+Broadcom non pubblica un datasheet ufficiale scaricabile per questa classe
+di SoC da gateway (materiale sotto NDA per i licenziatari). I dati sotto
+sono divisi in due gruppi: **osservati direttamente** sul log di boot
+seriale di questa unità (log completo in `UART-BOOT-LOG-IT.md`), e **noti
+pubblicamente** per la famiglia BCM63138 da fonti secondarie (driver open
+source OpenWrt/linux-brcm63xx, documentazione hack-technicolor, marketing
+collateral Broadcom) — questi ultimi marcati esplicitamente, perché non
+verificabili in modo indipendente su questo hardware specifico.
+
+| Parametro | Valore | Fonte |
+|---|---|---|
+| CPU | Dual-core ARM Cortex-A9 (ARMv7, rev 1), SMP | Osservato: `CPU: ARMv7 Processor [414fc091]`, `Brought up 2 CPUs` |
+| Cache L2 | PL310 (L2C-310), 16 way, 512 KB | Osservato: `L2C-310 cache controller enabled, 16 ways, 512 kB` |
+| Interrupt controller | Cortex-A9 MPCORE GIC | Osservato: `Cortex A9 MPCORE GIC init` |
+| Velocità stimata | ~1319 BogoMIPS/core (`lpj=659968`) — **non è una misura di clock esatta**, solo un ordine di grandezza | Osservato (calibrazione kernel) |
+| Clock massimo pubblicizzato per famiglia | fino a ~1 GHz per core | Pubblico, non verificato su questa unità |
+| Controller memoria | DDR3/DDR3L, fino a DDR3-1600 | Osservato: `DDR3-1600 CL11 512MB`, `NVRAM memcfg 0x427` |
+| Controller NAND | `BrcmNand`, versione **7.0** | Osservato: `Brcm NAND controller version = 7.0` |
+| Acceleratore pacchetti | "Runner"/BPM/Packet Flow Cache (offload hardware L2-L4) | Osservato: nomi driver `Broadcom Runner Blog Driver`, `Broadcom Packet Flow Cache` |
+| PCIe | 2 core PCIe Gen, 1 lane ciascuno (Rev 3.01) | Osservato: `bcm963xx-pcie: found core [0]`/`[1]` |
+| UART | 2x BCM63XX UART (`ttyS0`, `ttyS1`), base_baud 921600, console a **115200 8N1** | Osservato: `Serial: BCM63XX driver`, `ttyS0 at MMIO 0xfffe8600` |
+| Boot ROM sicuro | Verifica crittografica (RSA/SHA) via checkpoint a 4 caratteri (`BTRM`...`PASS`) prima di avviare CFE | Osservato + analisi statica firmware, vedi `UART-BOOT-LOG-IT.md` |
+| Processo litografico / package | Non reperibile da fonte pubblica affidabile | — omesso, non un'ipotesi da datasheet secondario |
+
+### 1.2 Datasheet — NAND Micron MT29F2G08ABA
+
+Il driver kernel stampa l'identificativo del chip per intero, quindi qui
+tutto è **verificato direttamente** sull'unità (non serve un datasheet
+esterno per i parametri di geometria — li ha già confermati Linux stesso
+durante il probe):
+
+```
+[    0.821933] brcmnand_read_id: CS0: dev_id=2cda9095
+[    0.845419] busWidth=1, pageSize=2048B, page_shift=11, page_mask=000007ff
+[    0.852402] BrcmNAND mfg 2c da MICRON MT29F2G08ABA 256MB on CS0
+[    0.898628] page_shift=11, bbt_erase_shift=17, chip_shift=28, phys_erase_shift=17
+[    0.913768] ECC layout=brcmnand_oob_bch4_2k
+[    0.928824] brcmnand_scan, eccsize=512, writesize=2048, eccsteps=4, ecclevel=4, eccbytes=7
+```
+
+| Parametro | Valore | Fonte |
+|---|---|---|
+| Manufacturer ID / Device ID | `0x2C` (Micron) / `0xDA` | Osservato: `mfg 2c da`, `dev_id=2cda9095` |
+| Tipo | SLC NAND, 2 Gbit (256 MB) | Osservato: `MICRON MT29F2G08ABA 256MB` |
+| Bus width | 8 bit (`busWidth=1`) | Osservato |
+| Pagina | 2048 byte dati + 64 byte spare (`oobsize=64`) | Osservato: `pageSize=2048B`, `mtd->oobsize=64` |
+| Blocco | 128 KB = 64 pagine (`erase_shift=17` → 2¹⁷ byte) | Osservato: `Block size=00020000, erase shift=17` |
+| ECC richiesta dal chip | minimo 4 bit corretti ogni 512 byte | Osservato indirettamente: il driver usa esattamente `eccsize=512`, `ecclevel=4` (BCH-4), coerente con la soglia minima tipica delle famiglie SLC Micron di questa generazione |
+| Endurance tipica dichiarata per la famiglia | ≥ 100.000 cicli P/E (classe SLC) | Pubblico (datasheet generico famiglia Micron SLC, non misurato su questa unità) |
+| Tensione operativa tipica per la famiglia | 3,3 V (range 2,7–3,6 V) | Pubblico, non misurato — coerente con l'adattatore UART usato in questo progetto (PL2303 a 3,3 V, vedi `UART-BOOT-LOG-IT.md`) |
+| Tempi tipici pubblicati per famiglia (program/erase) | program ~200 µs tip. / 700 µs max; erase ~1,5 ms tip. / 3 ms max | Pubblico, valori indicativi della classe di prodotto — non misurati su questa unità |
+
 ## 2. Tabella delle partizioni MTD
 
 Stampata dal driver `technicolor-nand-tl` a ogni boot (`parse_btab: num_banks (5)`):
