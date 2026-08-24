@@ -1219,8 +1219,113 @@ Rimossi per area: chroot(4823), usr(6), lib(3), etc(1), sbin(1), srv(1)
 
 Aggiunti per area: lib(1)
 
+**Nuovo file `lib/mount_root/00_overlay_threshold_check`** — script che controlla lo spazio usato dall'overlay e, se supera il 90%, cancella l'intera partizione `rootfs_data` e riavvia:
+
+```sh
+#!/bin/sh
+# This script is to delete the content from the /etc/bulkdata/ of both the bank_1 & bank_2
+MAX_USE_PERCENTAGE=90
+get_use_percentage=$(df -h | awk '$NF == "/overlay" {print $(NF-1)}' | tr -d '%')
+
+mtd_erase() {
+    sync
+    for mtd in "$@" ; do
+        if grep -q $mtd /proc/mtd ; then
+            mtd erase $mtd
+        fi
+    done
+}
+
+kill_writing_processes() {
+    local sig=${1:-15}
+    local OVERLAY_MOUNT=''
+    [ -d /overlayfs ] && OVERLAY_MOUNT='/overlayfs'
+    [ -d /overlay ]   && OVERLAY_MOUNT='/overlay'
+    lsof $OVERLAY_MOUNT | awk '/ REG / { print $2} ' | uniq | while read p ; do
+        if [ -d "/proc/$p" ] ; then
+            kill -$sig $p
+        fi
+    done
+}
+
+erase_jffs2_partition() {
+    local mount_point="$1"
+    mount -type overlayfs -o ro,remount /
+    umount -r "${mount_point}"
+    kill_writing_processes 9
+    mtd_erase 'rootfs_data'
+}
+
+if [ "$get_use_percentage" -gt "$MAX_USE_PERCENTAGE" ]; then
+  erase_jffs2_partition /overlay
+  sync
+  reboot -f
+fi
+```
+
+Modificati (oltre alla riga di versione in `etc/banner`/`etc/config/version`, build `3401135`→`3401180`, 2024-04-10→2024-09-26): `usr/bin/bulkdata` (ricompilato, 1 byte di differenza) e `etc/uci-defaults/tch_5000_versioncusto` (tabella mapping versione, aggiunte le voci per `2.4.3`/`2.4.4`).
+
 ## 2.4.4 -> 2.4.5
 
 **File totali**: 7362 -> 7365 (3 aggiunti, 0 rimossi, confronto contenuto su 7362 comuni)
 
 Aggiunti per area: etc(2), usr(1)
+
+**Modifiche di configurazione (diff reale):**
+
+`etc/config/cwmpd`:
+```diff
+-        option connectionrequest_throttle_number '100'
++        option connectionrequest_throttle_number '200'
+```
+
+`etc/init.d/wireless` e `etc/rc.d/S13wireless` (identiche, aggiungono una workaround marcata `NG-223325`):
+```diff
++    #WAR for NG-223325
++    if [ "$(cat /proc/device-tree/model 2>/dev/null)" == "Broadcom BCM963138" ]; then
++        local OLD_PID=$(ps | grep mon_reinit.sh | grep -v grep | cut -d ' ' -f2)
++        if [ $OLD_PID ]; then
++             echo "Warning: mon_reinit.sh script is already running. Kill old script PID: $OLD_PID" > /dev/console
++             kill -9 $OLD_PID
++        fi
++        echo "Start mon_reinit.sh monitor script" > /dev/console
++        mon_reinit.sh &
++    fi
+```
+(collegata al nuovo binario `usr/sbin/mon_reinit.sh` introdotto in questa stessa versione — vedi §3.7 / VERSION-CHANGELOG-IT.md)
+
+`etc/uci-defaults/tch_0030-network-wan`:
+```diff
+-        uci add_list qos.@reclassify[2].srcif='loopback'
+-        uci set qos.waneth4=device
+-        uci set qos.waneth4.pcp='5'
+-        uci set qos.waneth4.force_pcp='0'
+-        uci set qos.pcp_6=label
+-        uci set qos.pcp_6.pcp='6'
+-        uci add qos reclassify >/dev/null 2>/dev/null
+-        uci set qos.@reclassify[-1].target='pcp_6'
+-        uci set qos.@reclassify[-1].ports='7170,10500,10700'
+-        uci set qos.@reclassify[-1].proto='tcp'
+-        uci add_list qos.@reclassify[-1].srcif='loopback'
+-        uci add_list qos.@reclassify[-1].dstif='wan'
++uci add network ppp_placeholder
++uci set network.@ppp_placeholder[0].uciname='pppoe-wan'
+-uci commit qos
+```
+
+`etc/uci-defaults/tch_0090-remove`:
+```diff
++file=/etc/ssl/certs/4ec17c6c.0
++if [ -f $file ] ; then
++    mkdir -p /etc/ssl/acs-cert/
++    cp $file /etc/ssl/acs-cert/
++fi
+```
+
+`etc/uci-defaults/tch_5001_LTE_2_Box`:
+```diff
+-uci set cwmpd.operationalACS2.acs_url="https://fwa.cdp.tim.it/cwmpWeb/CPEMgt"
++uci set cwmpd.operationalACS2.acs_url="https://mobile.acs.tim.it:11201/cwmpWeb/WGCPEMgt"
+```
+
+Più il consueto bump di versione/build (`etc/banner`, `etc/config/version`: `3401180`→`3401200`, 2024-09-26→2024-11-19; `etc/uci-defaults/tch_5000_versioncusto` aggiorna la tabella mapping per `2.4.5`) e i mapping WiFi/MultiAP/host già noti dal changelog prosa.
