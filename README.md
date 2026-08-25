@@ -16,6 +16,8 @@
 - [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) — sequential version-by-version changelog (1.0.3 → 2.4.5_PATCHED), including the exact content of the rooting patch
 - [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) — layout NAND, partizioni MTD, sistema dual-bank, datasheet SoC/NAND
 - [`MEMORY-ARCHITECTURE-EN.md`](MEMORY-ARCHITECTURE-EN.md) — NAND layout, MTD partitions, dual-bank system, SoC/NAND datasheet
+- [`FIRMWARE-INTERNALS-IT.md`](FIRMWARE-INTERNALS-IT.md) — interni dell'immagine flash: layout kernel/squashfs per versione, header del blob kernel decodificato, generazione di `etc/config/network`, nuovi servizi 2.4.5
+- [`FIRMWARE-INTERNALS-EN.md`](FIRMWARE-INTERNALS-EN.md) — flash-image internals: per-version kernel/squashfs layout, decoded kernel-blob header, `etc/config/network` generation, new 2.4.5 services
 - [`UART-BOOT-LOG-IT.md`](UART-BOOT-LOG-IT.md) — trascrizione commentata di un boot seriale reale (Boot ROM, CFE, kernel Linux, recovery BOOTP/TFTP) con spiegazione dei checkpoint a 4 caratteri
 - [`UART-BOOT-LOG-EN.md`](UART-BOOT-LOG-EN.md) — annotated transcript of a real serial boot (Boot ROM, CFE, Linux kernel, BOOTP/TFTP recovery) with the 4-character checkpoints explained
 
