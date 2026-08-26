@@ -2,7 +2,7 @@
 
 Analisi a livello di byte del contenuto dell'immagine flash da 80 MiB (il payload `0xB0` in chiaro descritto in [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §2.3), che [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) descrive come contenuto di **un intero bank**. Questo file complementa gli altri: dove `MEMORY-ARCHITECTURE` descrive le partizioni NAND e `RBI-FORMAT` il contenitore `.rbi`, qui si guarda **dentro** l'immagine decifrata — dove finisce il kernel e inizia lo squashfs, com'è fatto l'header proprietario del blob kernel, da dove viene generato `etc/config/network` nelle build recenti, e cosa fanno davvero i servizi comparsi in 2.4.5.
 
-Tutti i valori sono ricavati per confronto diretto tra due immagini raw decifrate: **la build 2.2.1 stock** (`AGTEF_2.2.1_CLOSED.rbi`, di seguito "221") e **la build 2.4.5 CLOSED** (`AGTEF_2.4.5_CLOSED.rbi`, di seguito "245"). Gli offset citati sono relativi all'inizio del payload raw da 83.886.080 byte (80 MiB, `0x5000000`), non al file `.rbi`.
+Le sezioni 1, 3 e 4 sono ricavate per confronto diretto tra due immagini raw decifrate: **la build 2.2.1 stock** (`AGTEF_2.2.1_CLOSED.rbi`, di seguito "221") e **la build 2.4.5 CLOSED** (`AGTEF_2.4.5_CLOSED.rbi`, di seguito "245"). La sezione 2 (header/decompressione del blob kernel) è invece estesa a tutte e cinque le build ufficiali disponibili, `1.0.3` → `2.4.5`. Gli offset citati sono relativi all'inizio del payload raw da 83.886.080 byte (80 MiB, `0x5000000`), non al file `.rbi`.
 
 ## 1. Layout kernel/squashfs e crescita della partizione riservata
 
@@ -31,9 +31,11 @@ Va corretta un'affermazione errata secondo cui 221 e 245 condividerebbero la ste
 
 Sono due basi OpenWrt distinte: 221 è ancora su Chaos Calmer 15.05.1, 245 su una SNAPSHOT ricompilata con target e revisione completamente diversi. Questo **conferma a livello di offset/partizione** quanto già documentato in [`VERSION-CHANGELOG-DIFFS-IT.md`](VERSION-CHANGELOG-DIFFS-IT.md) sul rebuild della base OpenWrt avvenuto tra 2.2.1 e 2.3.2 — non lo contraddice: la crescita della finestra kernel e il cambio di `openwrt_release` sono due facce dello stesso rebase di piattaforma.
 
-## 2. Header del blob kernel (decodificato) e tentativo di decompressione
+## 2. Header del blob kernel (decodificato) e decompressione — risolta
 
-Entrambe le build iniziano il blob kernel con un header proprietario fisso di **0x1a (26) byte**, seguito dal corpo compresso. Decodifica campo per campo (offset relativi all'inizio del blob):
+> **Aggiornamento.** Una versione precedente di questo documento non aveva individuato un **mini-header di 12 byte** interposto tra l'header esterno da 26 byte e lo stream compresso, e concludeva quindi che la decompressione del corpo kernel fosse un vicolo cieco. Quell'affermazione era errata ed è **superata**: un'analisi successiva, estesa a tutte le versioni ufficiali disponibili (`1.0.3`, `2.2.0`, `2.2.1`, `2.4.1`, `2.4.5`), ha individuato il layout reale e ha recuperato il banner `Linux version` di ogni versione. Il dettaglio del formato è in §2.3.
+
+Entrambe le build iniziano il blob kernel con un header proprietario fisso di **0x1a (26) byte**, seguito dal mini-header e dallo stream compresso (§2.3). Decodifica campo per campo dell'header esterno (offset relativi all'inizio del blob):
 
 | Offset | Byte | 221 | 245 | Significato |
 |---|---|---|---|---|
@@ -60,23 +62,57 @@ Entrambi combaciano **byte-per-byte** con gli offset di fine payload kernel real
 
 ### 2.2 Campi ancora non identificati
 
-- `0x0c`–`0x0f`: il valore BE a 2 byte (443 per 221, 564 per 245) cambia con la versione. Provate e scartate le ipotesi di checksum, XOR dei byte del payload, e divisore della block-size del payload: nessuna torna. Scopo **non identificato**.
+- `0x0c`–`0x0f`: il valore BE a 2 byte cambia con la versione. Con i dati ora disponibili su 5 versioni ufficiali, in ordine cronologico i valori sono **408, 441, 443, 560, 564** (1.0.3, 2.2.0, 2.2.1, 2.4.1, 2.4.5): strettamente **non decrescenti**. Ma `2.4.1` e `2.4.5` hanno un corpo kernel **identico** (stesso sha256, §2.3) e tuttavia valori **diversi** (560 vs 564): questo dimostra che il campo **non** è un hash né una lunghezza derivati dal contenuto del kernel. Ipotesi più probabile: un contatore interno di build/revisione del vendor. Provate e scartate le ipotesi di checksum, XOR dei byte del payload, e divisore della block-size del payload. Scopo esatto ancora **non identificato**.
 - `0x11`–`0x15`: il tag `LINU\n` è identico in entrambe le build, ma il quinto byte è un line-feed `0x0a`, non `X` (`0x58`). Il motivo del troncamento/terminazione a line-feed **non è identificato** semanticamente (probabile tag fisso emesso dallo strumento di build Broadcom, non un campo interpretato).
 
-### 2.3 Decompressione del corpo — vicolo cieco documentato
+### 2.3 Decompressione del corpo — risolta (LZMA_ALONE + mini-header)
 
-Il corpo (byte da `0x1a` alla fine del payload reale, entrambe le build) è stato attaccato con tutti i formati di compressione plausibili per un kernel Broadcom bcm63xx. **Nessuno funziona.** Documentato qui con l'evidenza, così da non ripetere il lavoro:
+Il pezzo mancante che aveva fatto naufragare i tentativi precedenti è un **mini sub-header di 12 byte** interposto tra l'header esterno da 26 byte e lo stream compresso vero e proprio. Il bruteforce `FORMAT_RAW` falliva **immediatamente** proprio perché assumeva che lo stream iniziasse subito dopo il byte `0x1a`: in realtà lì c'è ancora una struttura, e lo stream è un container **LZMA_ALONE** standard (non un LZMA raw). Layer per layer, identico su tutte le 5 versioni ufficiali testate:
 
-- **gzip** (`1f 8b`): nessun match nei primi `0x2000`/`0x4000` byte.
-- **zlib/deflate** (header `78 xx` con checksum RFC1950 valido): un solo match casuale (245, `body+0x24`, `78 01`) che alla decompressione non produce output valido — falso positivo.
-- **LZMA "alone" legacy** (props byte `0x5d`): nessun match nei primi `0x400` byte.
-- **LZMA raw** (`FORMAT_RAW`), bruteforce completo di `lc ∈ 0–3`, `lp ∈ 0–2`, `pb ∈ 0–2`, `dict_size ∈ {1,2,4,8,16 MiB}`, offset di partenza `∈ {0,1,2,4,8,13}`: ogni combinazione fallisce **immediatamente** con dati corrotti, in entrambe le build.
-- Nessun magic **uImage** (`27 05 19 56`), **ELF** (`7f 45 4c 46`) o **stub ARM zImage** (`18 28 6f 01`) presente nel corpo.
-- **Entropia** del corpo ~7,95–8,0 bit/byte dall'inizio alla fine del payload reale — coerente con dati compressi o cifrati, e in particolare **assenza di uno stub decompressore a bassa entropia** prima dello stream (che ci si aspetterebbe in un `zImage` self-extracting).
+1. **Header esterno da 26 byte** (`0x00`–`0x19`): quello decodificato in §2/§2.1, invariato.
+2. **Mini sub-header da 12 byte** (offset file `0x1a`, offset corpo 0): tre word little-endian a 32 bit — `<load_addr> <load_addr ripetuto> <inner_length>`. `inner_length` = dimensione del corpo kernel **meno 12**, esatta su tutte le 5 versioni. `load_addr` = `0xc0008000` per `1.0.3`/`2.2.0`/`2.2.1`, e `0xc0018000` per `2.4.1`/`2.4.5` (indirizzo di load ARM diverso per le due più recenti).
+3. **Stream LZMA_ALONE** (offset file `0x26`, offset corpo 12): classico header `.lzma` "LZMA_ALONE" — 1 byte di proprietà, 4 byte little-endian di dimensione dizionario, 8 byte little-endian di dimensione decompressa — seguito da uno stream LZMA1 puro. Decodificabile direttamente con la libreria standard Python:
 
-Conferma indiretta dal log di boot in [`UART-BOOT-LOG-IT.md`](UART-BOOT-LOG-IT.md) (righe 153–156): il CFE stampa `Decompression OK!` poco prima del salto effettivo (`Starting program at 0x00008000`). Questo conferma che (a) il blob kernel è realmente compresso, e (b) è il **CFE stesso** a decomprimerlo internamente prima del salto.
+   ```python
+   import lzma
+   kernel = lzma.decompress(body[12:], format=lzma.FORMAT_ALONE)
+   ```
 
-**Conclusione.** L'header è decodificato quasi completamente: resta ignoto solo lo scopo dei campi `0x0c`–`0x0f` e il motivo esatto del tag `LINU\n`. Il corpo compresso resiste a tutti i metodi standard provati. L'ipotesi più probabile è che il CFE Broadcom usi una **variante LZMA proprietaria/non standard**, con i parametri (props, dizionario, eventuale pre-processing) hardcoded nel bootloader anziché nell'header del blob — il che spiegherebbe sia il fallimento immediato del bruteforce `FORMAT_RAW` sia l'assenza di uno stub in-band. Prossimo passo utile, **non tentato qui**: disassemblare la routine di decompressione del CFE, oppure reperire un GPL source drop Broadcom bcm963xx con il relativo `lzma.c` modificato e confrontarne i parametri.
+   Byte di proprietà = `0x6d` (lc=1, lp=2, pb=2), dizionario = 4 MiB — identici su ogni versione testata. È esattamente ciò che aveva sconfitto il tentativo "LZMA1 raw bruteforce": non era mai stato provato il container LZMA_ALONE standard con il suo header proprietà/dimensione embedded, perché si assumeva che lo stream iniziasse subito dopo l'header da 26 byte — il mini-header da 12 byte in mezzo era il pezzo mancante.
+
+Da qui il comportamento diverge tra le versioni:
+
+- **`1.0.3`, `2.2.0`, `2.2.1`**: questa singola decompressione LZMA_ALONE produce **direttamente** l'immagine kernel flat completa, con il banner `Linux version ...` leggibile in chiaro al suo interno.
+- **`2.4.1` e `2.4.5`**: la prima decompressione produce invece uno **stub zImage ARM Linux self-extracting** (confermato dalla firma canonica di `head.S`: 8× istruzioni NOP, poi un branch, poi la magic word `0x016f2818`, a offset relativo `0x24` nell'output decompresso — la firma standard e ben nota dello stub decompressore zImage ARM). Quello stub contiene un **secondo** stream LZMA_ALONE annidato, a offset relativo `0x41c4` (byte proprietà `0x6d`, dizionario 1 MiB, campo dimensione decompressa impostato al sentinella "lunghezza sconosciuta" `0xFFFFFFFFFFFFFFFF`, cioè "decomprimi finché lo stream stesso non finisce"). Decomprimendo quel secondo stream si ottiene il kernel flat reale e il suo banner. Quindi `2.4.1`/`2.4.5` sono **double-LZMA**: container esterno a livello CFE → zImage self-extracting → kernel reale; le quattro versioni più vecchie sono single-wrapped.
+
+**Banner `Linux version` recuperati** (stringhe esatte, verificate byte-per-byte sui file kernel decompressi):
+
+- **`1.0.3`** (kernel `3.4.11-rt19`):
+  `Linux version 3.4.11-rt19 (repowrt-builder@9c0b3ba154ab) (gcc version 4.6.4 (OpenWrt/Linaro GCC 4.6-2013.05 r49389) ) #1 SMP PREEMPT Thu Mar 9 02:50:43 UTC 2017`
+- **`2.2.0`** (kernel `4.1.38`):
+  `Linux version 4.1.38 (repowrt-builder@ff55a63a23d5) (gcc version 5.3.0 (OpenWrt GCC 5.3.0 unknown) ) #1 SMP PREEMPT Wed Oct 16 15:21:10 UTC 2019`
+- **`2.2.1`** (kernel `4.1.38`):
+  `Linux version 4.1.38 (repowrt-builder@2d2f3d55d158) (gcc version 5.3.0 (OpenWrt GCC 5.3.0 unknown) ) #1 SMP PREEMPT Fri Apr 24 18:36:14 UTC 2020`
+- **`2.4.1`** e **`2.4.5`** (kernel `4.1.52`, **corpo kernel identico byte-per-byte tra le due, confermato via sha256** — 2.4.5 non ha cambiato il kernel rispetto a 2.4.1, solo rootfs/pacchetti, coerente con quanto già documentato altrove nel repo su 2.4.1→2.4.5 come update piccolo e mirato):
+  `Linux version 4.1.52 (repowrt-builder@defb8768b1b8) (gcc version 5.5.0 (OpenWrt GCC 5.5.0 r14144-e2ae576c18) ) #0 SMP PREEMPT Fri Oct 28 16:57:49 2022`
+
+**Cross-validazione.** Per ognuna delle 5 versioni, il numero di kernel del banner recuperato combacia esattamente con `/lib/modules/<versione>/` nel rispettivo rootfs estratto — conferma indipendente che si tratta di una decompressione reale e non di un artefatto.
+
+#### Tabella comparativa (sola linea ufficiale)
+
+| Versione | Squashfs @ | Fine payload kernel | Dimensione kernel | Header `0x0c`–`0x0f` | `load_addr` | Kernel | Banner (build hash) |
+|---|---|---|---|---|---|---|---|
+| 1.0.3 | `0x200000` | `0x1b3d9c` | 1.785.218 byte | `0x0198` (408) | `0xc0008000` | 3.4.11-rt19 | `9c0b3ba154ab` |
+| 2.2.0 | `0x210000` | `0x1ff156` | 2.093.372 byte | `0x01b9` (441) | `0xc0008000` | 4.1.38 | `ff55a63a23d5` |
+| 2.2.1 | `0x210000` | `0x1ff96a` | 2.095.440 byte | `0x01bb` (443) | `0xc0008000` | 4.1.38 | `2d2f3d55d158` |
+| 2.4.1 | `0x600000` | `0x221d57` | 2.235.709 byte | `0x0230` (560) | `0xc0018000` | 4.1.52 | `defb8768b1b8` |
+| 2.4.5 | `0x600000` | `0x221d57` | 2.235.709 byte | `0x0234` (564) | `0xc0018000` | 4.1.52 | `defb8768b1b8` (identico a 2.4.1) |
+
+> La build community **non ufficiale** `1.1.3` condivide questo stesso layout e ha kernel identico a `1.0.3`, ma **non** appartiene alla linea ufficiale e non è inclusa qui: vedi [`AGTEF-1.1.3-NON-UFFICIALE-IT.md`](AGTEF-1.1.3-NON-UFFICIALE-IT.md).
+
+Conferma indiretta dal log di boot in [`UART-BOOT-LOG-IT.md`](UART-BOOT-LOG-IT.md) (righe 153–156): il CFE stampa `Decompression OK!` poco prima del salto effettivo (`Starting program at 0x00008000`) — coerente con il fatto che il **CFE stesso** decomprime lo stream LZMA_ALONE esterno e salta all'immagine (o, per `2.4.x`, allo stub zImage che a sua volta si auto-scompatta).
+
+**Conclusione.** Il formato del blob kernel è ora completamente compreso e riproducibile con la sola libreria standard Python: header 26 byte → mini-header 12 byte → LZMA_ALONE (→ per `2.4.x`, zImage → LZMA_ALONE annidato). Dell'header restano ignoti solo lo scopo esatto dei campi `0x0c`–`0x0f` (§2.2) e il motivo del tag `LINU\n`.
 
 ## 3. Da dove viene generato `etc/config/network` in 2.4.5
 
@@ -118,6 +154,5 @@ L'infrastruttura 1905.1 condivisa da `multiap_agent`/`multiap_controller` (stess
 
 ## 5. Aperture / limiti
 
-- **Algoritmo di compressione del corpo kernel non recuperato** (§2.3): tutti i formati standard falliscono; recuperarlo richiederebbe di disassemblare la routine di decompressione del CFE o un GPL source drop Broadcom bcm963xx con il relativo `lzma.c`.
-- **Campi header `0x0c`–`0x0f` e tag `LINU\n`** (§2.2): decodificati come byte ma non identificati semanticamente.
+- **Campi header `0x0c`–`0x0f` e tag `LINU\n`** (§2.2): decodificati come byte ma non identificati semanticamente. Con 5 versioni ufficiali i valori di `0x0c`–`0x0f` sono non decrescenti (408, 441, 443, 560, 564) ma provatamente **non** derivati dal contenuto del kernel (2.4.1 e 2.4.5 hanno kernel identico e valori diversi) — probabile contatore interno di build del vendor, non confermato.
 - **Binari `nanocdn-core` / `nanocdn-rr` non trovati** nel filesystem estratto (§4): l'identificazione come Broadpeak nanoCDN è basata su path, vendor dir (`/etc/broadpeak/`), utente dedicato e helper Lua — **non** su stringhe estratte dai binari stessi, che non sono presenti nel listing.
