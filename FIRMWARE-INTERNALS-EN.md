@@ -114,6 +114,58 @@ Indirect confirmation from the boot log in [`UART-BOOT-LOG-EN.md`](UART-BOOT-LOG
 
 **Conclusion.** The kernel-blob format is now fully understood and reproducible with the Python standard library alone: 26-byte header → 12-byte mini-header → LZMA_ALONE (→ for `2.4.x`, zImage → nested LZMA_ALONE). Of the header, only the exact purpose of fields `0x0c`–`0x0f` (§2.2) and the reason for the `LINU\n` tag remain unknown.
 
+### 2.4 ARM disassembly of the recovered flat kernels and verification of the `load_addr` field
+
+Deepening §2.3: the first ~100–200 bytes of each of the 5 recovered final flat kernels were disassembled (capstone, ARM mode), starting from each version's `load_addr` (the mini-header field already documented in §2.3). All 5 produce immediately recognizable ARM Linux `head.S` code — no fallback to Thumb mode needed.
+
+**`1.0.3` (kernel `3.4.11-rt19`, `load_addr=0xc0008000`)** — "classic" pre-Hyp-stub entry code, typical of the 3.x kernel era:
+
+```
+0xc0008000: msr  cpsr_c, #0xd3          ; force SVC32 mode, IRQ/FIQ disabled
+0xc0008004: mrc  p15, 0, sb, c0, c0, 0  ; read MIDR (processor ID)
+0xc0008008: bl   #0xc030aea0            ; __lookup_processor_type
+0xc000800c: movs sl, r5
+0xc0008010: beq  #0xc030aee4            ; __error_p
+0xc0008014: add  r3, pc, #0x2c
+0xc0008018: ldm  r3, {r4, r8}
+...
+0xc0008050: add  r4, r8, #0x4000
+```
+
+**`2.2.0`/`2.2.1`/`2.4.1`/`2.4.5` (kernel `4.1.x`)** — **byte-for-byte identical** code between the two groups (2.2.x at `load_addr=0xc0008000`, 2.4.x at `load_addr=0xc0018000`), differing only in the printed base address:
+
+```
+0xc0008000: bl   #0xc000ab80  ; __hyp_stub_install
+0xc0008004: mrs  sb, apsr
+0xc0008008: eor  sb, sb, #0x1a
+0xc000800c: tst  sb, #0x1f
+0xc0008010: bic  sb, sb, #0x1f
+0xc0008014: orr  sb, sb, #0xd3
+0xc0008018: bne  #0xc0008030
+0xc000801c: orr  sb, sb, #0x100
+0xc0008020: add  lr, pc, #0xc
+0xc0008024: msr  spsr_fsxc, sb
+0xc0008028: msr  elr_hyp, lr
+0xc000802c: eret
+0xc0008030: msr  cpsr_c, sb            ; fallback: force SVC directly if not in Hyp
+0xc0008034: mrc  p15, 0, sb, c0, c0, 0
+0xc0008038: bl   #0xc000950c           ; __lookup_processor_type
+0xc000803c: movs sl, r5
+0xc0008040: beq  #0xc00095a0           ; __error_p
+```
+
+**Interpretation (a genuine technical fact, not a hypothesis).** Between the `3.4.11-rt19` kernel (1.0.3) and the `4.1.x` line (2.2.0 onward), the `bl __hyp_stub_install` + `safe_svcmode_maskall` prologue appeared — an upstream ARM Linux macro that tries to drop from Hyp mode to SVC via an `ERET` trick, falling back to a direct `msr cpsr_c` if boot did not happen in Hyp mode. This is `CONFIG_ARM_VIRT_EXT` support, added upstream between these two kernel generations — consistent with the known evolution of the line (the kernel-generation jump already documented in §1/§2). No `0x016f2818` magic and no ASCII strings in the first 4 KB of any of the 5 final flat kernels — unlike the intermediate 2.4.x zImage stub (which does carry that magic, §2.3) — confirming that these 5 files are indeed the final kernels, not further wrappers.
+
+**2.2.x vs 2.4.x comparison.** The entry code is byte-for-byte identical between the two groups (only the address differs). **No structural difference is visible in the entry code** (reserved space, stack, extra instructions) that would explain the need for the +64 KiB `load_addr` shift between the two groups — the explanation, if any, is not in the entry code itself.
+
+**What `load_addr` represents — confirmed, no longer just a field value.** Cross-checking against a real UART boot log from a `4.1.38`-class unit (already present in this repo, [`UART-BOOT-LOG-EN.md`](UART-BOOT-LOG-EN.md)), which reports `Entry Address: 0x00008000` during the real boot, the arithmetic `0xc0008000 − 0xc0000000 (PAGE_OFFSET) = 0x00008000` works out **exactly**. This confirms that `load_addr` in the mini-header is the kernel's *virtual* link address (`PAGE_OFFSET + TEXT_OFFSET`, the standard ARM Linux convention), and that the physical `Entry Address` seen by CFE in the real UART log is its counterpart before the MMU is enabled. **Honest note:** the repo contains no real UART log from a 4.1.52-class (2.4.x) unit — extending the same arithmetic to `0xc0018000 − 0xc0000000 = 0x00018000` for that group is a logical consequence of the same already-confirmed relationship, not an independent direct observation. It should be flagged as such.
+
+**What could NOT be resolved, despite a real attempt:**
+
+- **The reason for the +64 KiB shift** (`0xc0008000`→`0xc0018000`) between the two kernel generations: explained neither by the disassembly (no structural difference in the entry code) nor by the available UART log. Most plausible hypothesis offered (explicitly stated as a hypothesis, not a confirmed fact): a routine change to the `TEXT_OFFSET`/`zreladdr` parameter in the board/BSP configuration between the `4.1.38` and `4.1.52` kernel builds, to reserve more space below the kernel (larger DTB/ATAG, decompressor scratch area) — not verified against any source.
+- **Public search on the header format:** no public documentation was found for this specific 26-byte proprietary header, for the `0x0c`–`0x0f` field, or for the `LINU\n` tag. The only actually publicly documented Broadcom-related format is the classic 256-byte `bcm963xx_tag` (CFE NOR partition ImageTag — e.g. `linux/bcm963xx_tag.h`, kernel.org documentation on bcm963xx CFE partitions), which has a conceptually similar field (`image_sequence`, a 4-byte build counter) — a weak conceptual parallel in support of the "vendor build counter" hypothesis for `0x0c`–`0x0f`, but the layout is structurally different (256 bytes, `tag_version`/`sig_1`/`chip_id`/`board_id` fields) from our 26-byte proprietary header: **it is not the same format**, and should be presented only as a conceptual analogy, not an identification. This header remains **publicly undocumented**.
+- **Negative cross-check** (new check, reinforces the existing characterization): the 5 `0x0c`–`0x0f` values (408, 441, 443, 560, 564) were searched in `etc/banner`, `etc/config/version` and `etc/uci-defaults/tch_5000_versioncusto` of each of the 5 corresponding versions (build IDs like `2781008`/`3161014`/`3161018`/`3401135`/`3401200`, timestamps like `20170411105953`) — **no match in any case**. The field does not derive from any of these known version identifiers in the rootfs. This reinforces (does not resolve) the existing characterization as a "vendor-internal counter/field, not confirmed."
+
 ## 3. Where `etc/config/network` comes from in 2.4.5
 
 In 245 the file `etc/config/network` is **not present** in the squashfs, while in 221 it is. This is neither a regression nor a lost config: the file is **synthesized at first real boot**. Reconstruction of the mechanism, with the evidence.
@@ -154,5 +206,6 @@ The shared 1905.1 infrastructure of `multiap_agent`/`multiap_controller` (same m
 
 ## 5. Open questions / limits
 
-- **Header fields `0x0c`–`0x0f` and the `LINU\n` tag** (§2.2): decoded as bytes but not identified semantically. Across 5 official versions the `0x0c`–`0x0f` values are non-decreasing (408, 441, 443, 560, 564) but provably **not** derived from the kernel content (2.4.1 and 2.4.5 have an identical kernel yet different values) — likely a vendor-internal build counter, not confirmed.
+- **Meaning of `load_addr` — confirmed; its +64 KiB shift — not** (§2.4): the *meaning* of `load_addr` is now confirmed (virtual link address = `PAGE_OFFSET + TEXT_OFFSET`, cross-validated against a real 4.1.38-class UART boot log, `Entry Address: 0x00008000`), no longer just a raw field value. What remains **unresolved** is the reason for its +64 KiB shift (`0xc0008000`→`0xc0018000`) between the `4.1.38` and `4.1.52` kernel generations, despite a real disassembly-based attempt: the entry code is byte-for-byte identical between the two groups, with no structural difference to justify it. Most plausible hypothesis (unconfirmed): a routine change to `TEXT_OFFSET`/`zreladdr` in the BSP/board config.
+- **Header fields `0x0c`–`0x0f` and the `LINU\n` tag** (§2.2, §2.4): decoded as bytes but not identified semantically. Across 5 official versions the `0x0c`–`0x0f` values are non-decreasing (408, 441, 443, 560, 564) but provably **not** derived from the kernel content (2.4.1 and 2.4.5 have an identical kernel yet different values) — likely a vendor-internal build counter, not confirmed. Now with broader evidence behind the "still unknown" conclusion: the 5 values were additionally searched in the rootfs version identifiers (`etc/banner`, `etc/config/version`, `etc/uci-defaults/tch_5000_versioncusto`) with a **confirmed negative match** in every case, and checked against public documentation (the `bcm963xx_tag` is a structurally different, unrelated format — 256 bytes, different layout — not the same header). Still open, but the "still unknown" conclusion now rests on an explicit attempt rather than an unexamined gap.
 - **`nanocdn-core` / `nanocdn-rr` binaries not found** in the extracted filesystem (§4): identification as Broadpeak nanoCDN is based on path, vendor dir (`/etc/broadpeak/`), dedicated user, and Lua helper — **not** on strings extracted from the binaries themselves, which are absent from the listing.
