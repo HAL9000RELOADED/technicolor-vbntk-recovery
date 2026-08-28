@@ -40,6 +40,24 @@ Before giving up on direct rooting, downgrading to an older, presumably still-vu
 
 **Result**: on a **healthy** router, holding reset for 8 seconds does not trigger BOOTP recovery mode — that mode only fires *automatically* after a genuine boot failure on both firmware banks (verified: after the reset, firmware stayed unchanged at `AGTEF_2.4.5` and the router came back up normally within ~1 minute). Deliberately forcing it would require recreating a genuine boot failure — exactly the risk that caused the original incident — so the idea was dropped as not safely practicable without a second deliberate attempt at corrupting the banks.
 
+**Update 2026-08-27 — the "2.2.1 presumably still vulnerable" premise is confirmed**: on **a different physical unit** (not the one this guide is about, which stays on 2.4.5 here) found already running firmware **AGTEF_2.2.1**, root via the classic "Ansuel GUI"/AutoFlashGUI chain is indeed present and working — confirmed by reading `/etc/init.d/rootdevice` and `/etc/modgui_scripts/*.sh` (Christian Marangi, GUI version `9.6.69-3bd8c3f6`) and the live dropbear config, which shows a dedicated `dropbear.afg` stanza (LAN-only) enabled. Opkg feeds used for packages (LuCI etc.), for future reference:
+```
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/base
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/packages
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/luci
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/routing
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/telephony
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/target/packages
+```
+This does **not** solve the practical problem described above (how to force
+the downgrade/BOOTP on a healthy router without recreating the original
+incident) — it's only independent confirmation that, once a safe way to
+reach 2.2.1 is found, the vulnerability surface AutoFlashGUI exploits is
+still present on that version. See also `MEMORY-ARCHITECTURE-EN.md`
+§2.1/§4.1/§5 for other data collected on the same unit (partition map,
+config-backup encryption mechanism, a — third-hand, unconfirmed — lead on
+bank targeting via BOOTP).
+
 ## Success: config restore via the stock UI (no root needed)
 
 Scanning the admin panel's pages (no firmware-upgrade link/button is exposed anywhere in this TIM-branded skin — likely deliberately removed), the "Gateway" tile's "Configuration" tab was found to still expose native **Export/Import Configuration**:
