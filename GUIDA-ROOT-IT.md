@@ -40,6 +40,25 @@ Prima di arrendersi sul rooting diretto, si è considerato di **scaricare una ve
 
 **Risultato**: su un modem **sano**, tenere premuto reset per 8 secondi non innesca la modalità di recovery BOOTP — quella modalità scatta *automaticamente* solo dopo un vero fallimento di boot su entrambi i bank firmware (verificato: dopo il reset, il firmware restava `AGTEF_2.4.5` invariato e il modem tornava operativo normalmente in ~1 minuto). Forzarla deliberatamente richiederebbe ricreare un vero fallimento di boot — esattamente il rischio che ha causato l'incidente originale — quindi l'idea è stata scartata come non praticabile in sicurezza senza un secondo tentativo volontario di corrompere i bank.
 
+**Aggiornamento 2026-08-27 — la premessa "2.2.1 presumibilmente ancora vulnerabile" è confermata**: su **un'unità fisica diversa** (non quella di questa guida, che qui resta su 2.4.5) trovata già con firmware attivo **AGTEF_2.2.1**, il root via la classica catena "Ansuel GUI"/AutoFlashGUI risulta effettivamente presente e funzionante — confermato leggendo `/etc/init.d/rootdevice` e `/etc/modgui_scripts/*.sh` (Christian Marangi, GUI version `9.6.69-3bd8c3f6`) e la config dropbear live, che mostra una stanza dedicata `dropbear.afg` (solo LAN) attiva. Feed opkg usati per i pacchetti (LuCI ecc.), per riferimento futuro:
+```
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/base
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/packages
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/luci
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/routing
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/telephony
+https://raw.githubusercontent.com/Ansuel/GUI_ipk/kernel-4.1/target/packages
+```
+Questo **non risolve** il problema pratico descritto sopra (come forzare il
+downgrade/BOOTP su un modem sano senza ricreare l'incidente originale) — è
+solo una conferma indipendente che, una volta ottenuto un modo sicuro di
+arrivare alla 2.2.1, la superficie di vulnerabilità sfruttata da
+AutoFlashGUI è ancora presente su quella versione. Vedi anche
+`MEMORY-ARCHITECTURE-IT.md` §2.1/§4.1/§5 per altri dati raccolti sulla
+stessa unità (mappa partizioni, meccanismo di cifratura del backup config,
+un indizio — di terza mano, non confermato — sul targeting del bank via
+BOOTP).
+
 ## Successo: ripristino configurazione via interfaccia stock (nessun root richiesto)
 
 Analizzando le pagine del pannello admin (nessun link/pulsante di firmware upgrade risulta esposto da nessuna parte in questa skin TIM — probabilmente rimosso deliberatamente), si è trovato che il tile "Gateway" → tab "Configuration" espone comunque **Export/Import Configuration** nativi:

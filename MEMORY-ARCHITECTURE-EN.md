@@ -82,6 +82,37 @@ Printed by the `technicolor-nand-tl` driver on every boot (`parse_btab: num_bank
 a `.rbi` (see `RBI-FORMAT-EN.md` §2.3) — confirming a VBNT-K `.rbi` always
 carries the content of **one entire bank**, never a subset.
 
+### 2.1 Comparison: `/proc/mtd` on a different, already-rooted unit, firmware AGTEF_2.2.1
+
+Data collected in a separate session (2026-08-27), **on a physical unit
+different** from the one this document is based on (MAC/serial not
+published), running firmware **AGTEF_2.2.1** (OpenWrt Chaos Calmer 15.05.1,
+kernel 4.1.38) — so not directly comparable to the 2.4.5 discussed
+elsewhere in this repo, but useful as a second data point for the same
+board model:
+
+```
+mtd0: 10000000 00020000 "brcmnand.0"   (whole chip, 256MB)
+mtd1: 04df0000 00020000 "rootfs"       (81,723,392 bytes, squashfs, ro)
+mtd2: 05920000 00020000 "rootfs_data"  (93,323,264 bytes ≈ 89MB)
+mtd3: 05000000 00020000 "bank_1"       (83,886,080 bytes = 80MB)
+mtd4: 05000000 00020000 "bank_2"       (83,886,080 bytes = 80MB)
+mtd5: 00020000 00020000 "eripv2"       (131,072 bytes = 128KB)
+mtd6: 00040000 00020000 "rawstorage"   (262,144 bytes = 256KB)
+```
+
+`eripv2`, `rawstorage`, `rootfs_data`, `bank_1`, `bank_2` match the table
+above **exactly** in size. The difference is `rootfs`: here it appears as
+a **standalone MTD node** (`mtd1`, ~81.7MB, almost as large as a full
+bank), not as the ~44MB dynamic sub-partition inside the active bank
+described above. Unclear whether this is a firmware/kernel-version
+difference (different partition-table generation in
+`technicolor-nand-tl` between 2.2.1 and 2.4.5) or a hardware revision —
+**not verified**, noted here only as a comparison point for anyone working
+on other units/versions. Live mount observed on this same unit: `mtd1`
+("rootfs") mounted **ro** on `/rom`; `mtd2` ("rootfs_data") mounted **rw**
+on `/overlay`, matching the classic squashfs+overlayfs scheme from §3.
+
 ## 3. Dual-bank system and `/etc` persistence
 
 - `bank_1`/`bank_2`: two complete, independent copies of kernel+squashfs.
@@ -135,10 +166,38 @@ encryption (see `RBI-FORMAT-EN.md` §2.1) — this would explain why OSCK is
 "per board model" (see the dedicated note in that file) rather than
 generated on the fly.
 
-Related note: the "THENC" configuration backup format (see
-`root/import_config.py`) uses a separate AES-256/HMAC-SHA1 key, read at
-runtime from `/proc/rip/0108` — the same `rip`/`ripdrv` sub-system, but
-likely distinct key material from what's used for `.rbi` files.
+### 4.1 "THENC" format (configuration backup) — mechanism confirmed from source code
+
+Update 2026-08-27: the hypothesis about the "THENC" backup (see
+`root/import_config.py`) is now **confirmed by directly reading the Lua
+source** (`/usr/lib/lua/transformer/shared/ConfigCommon.lua`) on **a
+different unit** than the one this document is based on, running firmware
+**AGTEF_2.2.1** (not 2.4.5 — an older version, so the confirmation is on the
+mechanism, not guaranteed byte-identical on 2.4.5, though the `transformer`
+module is shared across versions and doesn't appear changed in the diffs
+documented so far in `VERSION-CHANGELOG-EN.md`):
+
+- Plaintext file header: `PREAMBLE=THENC`, `BACKUPVERSION=1.00`,
+  `BOARDMNEMONIC`, `PRODUCTNAME`, `SERIALNUMBER`, `MAC`, `BUILDVERSION`,
+  `CIPHERKEY=GW`, `SIGNATUREKEY=GW` — `GW` is an **alias**, not the key
+  itself.
+- Alias `"GW"` → key read from `/proc/rip/0108` (`rip_random_B` in the
+  source): AES key = **first 32 bytes**, HMAC key = **first 64 bytes** of
+  the same blob.
+- Alternate alias `"GW_KEYD"` (not used by default, only if
+  `system.config.export_commonkey`/`import_commonkey` is explicitly set)
+  → key from `/proc/rip/012b` (`rip_random_D`): AES = bytes 1–32, HMAC =
+  bytes 33–96.
+- Scheme: `cipher_scheme = "AES-256-CBC"`, `signature_scheme = "HMAC-SHA1"`.
+- Verified on the 2.2.1 unit: no active UCI override (default `"GW"`
+  confirmed in use), `export_plaintext`/`export_unsigned` = 0 (encryption+
+  signing active as normal).
+
+**Not transferable between units**: the material at `/proc/rip/0108` is
+per-board (same `rip`/`ripdrv` sub-system as §4, plausibly per-unit like
+OSCK/OSIK), so knowing the algorithm does not let you decrypt a different
+unit's `config.bin` without reading that unit's own key as root — for this
+reason, no byte of the observed key is published here, only the mechanism.
 
 ## 5. Open questions / to verify
 
@@ -149,6 +208,17 @@ likely distinct key material from what's used for `.rbi` files.
   bank — in the 2026-08-23 tests it always wrote to and booted from Bank 1,
   but the router was already on Bank 1 before the test, so this doesn't
   distinguish between the two hypotheses.
+  **Third-hand, independently-unconfirmed report** (from a different
+  parallel session, relayed only as project memory, not personally
+  verified): a BOOTP/TFTP flash attempt of a 1.0.3 image was reportedly
+  accepted/written by the CFE, but on reboot the router came back up on
+  **the other** bank (unchanged). If confirmed, this would mean "bank
+  written by BOOTP" and "bank activated on boot" are governed by
+  independent CFE mechanisms — consistent with this bullet's hypothesis,
+  but needs a dedicated test (e.g. starting from a known `booted` ≠
+  `active` state, as observed on the 2.2.1 unit in §2.1: there
+  `booted=bank_2` but `active=bank_1` under normal conditions) before
+  relying on it for a downgrade plan.
 - The exact relationship between `rootfs` (the ~44MB dynamic
   sub-partition) and the squashfs content inside the active bank hasn't
   been reconstructed byte-for-byte — the squashfs offset inside the 80MB
@@ -163,3 +233,15 @@ likely distinct key material from what's used for `.rbi` files.
   untouched by the patch) — either the source file in `F:\Modem` isn't
   genuinely 2.2.1, or the kernel→version mapping in §3.4 needs revisiting.
   Not yet investigated.
+
+  **Data point toward resolving this (2026-08-27)**: on **a different
+  unit**, live and running, with `BUILDVERSION`/
+  `friendly_sw_version_activebank` confirmed via UCI = `AGTEF_2.2.1`,
+  `uname -a` reports `Linux version 4.1.38 (repowrt-builder@...) ... Fri
+  Apr 24 18:36:14 UTC 2020` — i.e. **confirms kernel 4.1.38 for 2.2.1**,
+  matching `RBI-FORMAT-EN.md` §3.4's attribution and NOT what the
+  2026-08-23 boot log showed. This strengthens the hypothesis that the
+  `AGTEF_2.2.1_CLOSED.rbi` file used in that test wasn't genuinely a real
+  2.2.1 (rather than the kernel→version map needing revision) — not
+  conclusive proof (different physical unit, not the same `.rbi` file
+  verified byte-for-byte), but a concrete data point in that direction.
