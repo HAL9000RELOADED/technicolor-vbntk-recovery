@@ -2,7 +2,7 @@
 
 ## Condizioni di partenza
 
-- **Router:** Technicolor VBNT-K (identificato via CFE come Technicolor DGA4130), SoC Broadcom BCM63138, kernel Linux 4.1.52, firmware derivato OpenWrt con branding dell'operatore ("AGTEF"), architettura a doppio bank firmware con verifica firma. Il dispositivo era originariamente fornito in comodato dall'operatore (non all'autore di questa guida) ed è ora di proprietà piena dell'attuale possessore.
+- **Router:** Technicolor VBNT-K (identificato via CFE come Technicolor DGA4130), SoC Broadcom BCM63138, kernel Linux 4.1.52, firmware derivato OpenWrt con branding dell'operatore ("AGTEF"), architettura a doppio bank firmware con verifica firma.
 - **Obiettivo iniziale:** il firmware ISP stock non include moduli VPN. Obiettivo: compilare e installare `kmod-wireguard` + `kmod-tun` per lo stesso identico kernel del router, per abilitare un tunnel WireGuard nativo (client verso un provider VPN e/o server per accesso remoto "road warrior"), senza sostituire il firmware ISP.
 - **Vincoli noti:** l'operatore non aggiorna più da tempo il firmware di questo specifico modem. Nessun accesso seriale/UART disponibile in partenza — solo rete (SSH root ottenuto in precedenza tramite procedura di rooting separata) e porta USB del router per storage.
 
@@ -185,7 +185,7 @@ La sola rete (Parte D) basta per un recovery "al buio": si vede se il router chi
 
 ### Collegamento
 
-- **Hardware**: adattatore USB-seriale **Prolific PL2303** collegato ai pin UART del router (TX/RX/GND, nessun livello 5V — il PL2303 in modalità 3.3V va bene per questo SoC). Parametri: **115200 baud, 8N1**, nessun controllo di flusso.
+- **Hardware**: adattatore USB-seriale  collegato ai pin UART del router (TX/RX/GND. Parametri: **115200 baud, 8N1**, nessun controllo di flusso.
 - **Porta COM**: assegnata da Windows al plug-in dell'adattatore (tipicamente `COM3`/`COM10` a seconda della sessione — Windows può riassegnare il numero se l'adattatore viene ricollegato). Va verificata a ogni sessione, non è fissa.
 - **Attenzione**: la console seriale resta **viva anche a Linux già avviato** — un tool che scrive sulla porta senza supervisione dopo il boot (in particolare un vero BREAK seriale, `send_break()`) può innescare il **Magic SysRq** del kernel e uccidere tutti i processi utente, facendo sembrare un boot riuscito un "blocco" misterioso. Va sempre chiaro cosa sta scrivendo sulla porta e quando smettere.
 
