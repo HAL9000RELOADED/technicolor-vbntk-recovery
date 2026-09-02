@@ -1,10 +1,10 @@
-# Guida passo-passo: build WireGuard custom + recovery brick (Technicolor VBNT-K / TIM)
+# Guida passo-passo: build WireGuard custom + recovery brick (Technicolor VBNT-K)
 
 ## Condizioni di partenza
 
-- **Router:** Technicolor VBNT-K (identificato via CFE come Technicolor DGA4130), SoC Broadcom BCM63138, kernel Linux 4.1.52, firmware derivato OpenWrt con branding TIM ("AGTEF"), architettura a doppio bank firmware con verifica firma. Il dispositivo era originariamente fornito in comodato da TIM (non all'autore di questa guida) ed è ora di proprietà piena dell'attuale possessore.
-- **Obiettivo iniziale:** il firmware TIM stock non include moduli VPN. Obiettivo: compilare e installare `kmod-wireguard` + `kmod-tun` per lo stesso identico kernel del router, per abilitare un tunnel WireGuard nativo (client verso un provider VPN e/o server per accesso remoto "road warrior"), senza sostituire il firmware ISP.
-- **Vincoli noti:** TIM non aggiorna più da tempo il firmware di questo specifico modem. Nessun accesso seriale/UART disponibile in partenza — solo rete (SSH root ottenuto in precedenza tramite procedura di rooting separata) e porta USB del router per storage.
+- **Router:** Technicolor VBNT-K (identificato via CFE come Technicolor DGA4130), SoC Broadcom BCM63138, kernel Linux 4.1.52, firmware derivato OpenWrt con branding dell'operatore ("AGTEF"), architettura a doppio bank firmware con verifica firma. Il dispositivo era originariamente fornito in comodato dall'operatore (non all'autore di questa guida) ed è ora di proprietà piena dell'attuale possessore.
+- **Obiettivo iniziale:** il firmware ISP stock non include moduli VPN. Obiettivo: compilare e installare `kmod-wireguard` + `kmod-tun` per lo stesso identico kernel del router, per abilitare un tunnel WireGuard nativo (client verso un provider VPN e/o server per accesso remoto "road warrior"), senza sostituire il firmware ISP.
+- **Vincoli noti:** l'operatore non aggiorna più da tempo il firmware di questo specifico modem. Nessun accesso seriale/UART disponibile in partenza — solo rete (SSH root ottenuto in precedenza tramite procedura di rooting separata) e porta USB del router per storage.
 
 ---
 
@@ -91,7 +91,7 @@ Con la build corretta (vermagic combaciante) pronta, durante l'installazione via
 
 ### Materiali già disponibili
 
-Da un lavoro precedente di rooting dello stesso dispositivo, erano già disponibili localmente: più versioni del firmware ufficiale TIM (`AGTEF_x.y.z_CLOSED.rbi`), lo strumento community `autoflashgui` (usato in passato per il rooting via exploit DDNS su router **già avviato** — non applicabile a un bootloader fermo in recovery), PuTTY/WinSCP, e note personali sulla procedura di rooting.
+Da un lavoro precedente di rooting dello stesso dispositivo, erano già disponibili localmente: più versioni del firmware ufficiale dell'operatore (`AGTEF_x.y.z_CLOSED.rbi`), lo strumento community `autoflashgui` (usato in passato per il rooting via exploit DDNS su router **già avviato** — non applicabile a un bootloader fermo in recovery), PuTTY/WinSCP, e note personali sulla procedura di rooting.
 
 > Nota: la procedura di rooting via `autoflashgui` richiede un router **acceso e raggiungibile** (accesso web admin/admin) — non si applica a questo scenario, dove il router è fermo nel bootloader prima che qualsiasi sistema operativo carichi.
 
@@ -251,7 +251,7 @@ Il bootloader CFE, durante l'avvio normale, stampa periodicamente `Market ID` se
 - [Repository GitHub PJO2/tftpd64](https://github.com/PJO2/tftpd64) (fonte del bug `siaddr` scoperto e aggirato)
 - [Issue #235 hack-technicolor — supporto DGA4130/VBNT-K](https://github.com/hack-technicolor/hack-technicolor/issues/235)
 - Link toolchain/buildroot di Ansuel, referenziati dal README del repo GitHub `Ansuel/GUI_ipk`
-- Thread del forum ilpuntotecnico.com sul rooting dei Technicolor TIM
+- Thread del forum ilpuntotecnico.com sul rooting dei Technicolor
 - Wireshark, Npcap, Python 3 + scapy, Tftpd64
 
 ## Nota legale

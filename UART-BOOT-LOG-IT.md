@@ -90,7 +90,7 @@ ancora di scriverlo.
 ## Fase 2 — CFE, alias "Technicolor Gateway"
 
 Subito dopo `PASS` compare il banner del bootloader vero e proprio — nel
-firmware TIM/Technicolor si presenta come "Technicolor Gateway", ma è
+firmware ISP/Technicolor si presenta come "Technicolor Gateway", ma è
 un CFE (Common Firmware Environment) Broadcom con branding personalizzato.
 Prima si ripresenta la sequenza di checkpoint (stavolta il "Blocco 2",
 diverso dal primo — vedi la tabella completa più sotto), poi la

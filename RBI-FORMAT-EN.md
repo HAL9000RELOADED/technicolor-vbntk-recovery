@@ -1,6 +1,6 @@
 # AGTEF `.rbi` format: header, encryption and "signature" — what changes between versions
 
-Analysis of the `.rbi` firmware container used by the Technicolor VBNT-K (TIM, `AGTEF_x.y.z_CLOSED.rbi`), of its internal encryption/"signature" mechanism, and a real comparison between versions `1.0.3` and `2.4.5` (original vs patched).
+Analysis of the `.rbi` firmware container used by the Technicolor VBNT-K (`AGTEF_x.y.z_CLOSED.rbi`), of its internal encryption/"signature" mechanism, and a real comparison between versions `1.0.3` and `2.4.5` (original vs patched).
 
 ## 1. Static header
 

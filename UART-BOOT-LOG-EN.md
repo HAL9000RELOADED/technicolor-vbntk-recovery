@@ -89,7 +89,7 @@ writing it.
 ## Stage 2 — CFE, a.k.a. "Technicolor Gateway"
 
 Right after `PASS` comes the banner of the actual bootloader — in
-TIM/Technicolor firmware it presents itself as "Technicolor Gateway", but
+ISP/Technicolor firmware it presents itself as "Technicolor Gateway", but
 it's a Broadcom CFE (Common Firmware Environment) with custom branding.
 First the checkpoint sequence runs again (this time "Block 2", different
 from the first one — see the full table below), then DDR3 RAM
