@@ -1324,8 +1324,8 @@ Aggiunti per area: etc(2), usr(1)
 
 `etc/uci-defaults/tch_5001_LTE_2_Box`:
 ```diff
--uci set cwmpd.operationalACS2.acs_url="https://fwa.cdp.tim.it/cwmpWeb/CPEMgt"
-+uci set cwmpd.operationalACS2.acs_url="https://mobile.acs.tim.it:11201/cwmpWeb/WGCPEMgt"
+-uci set cwmpd.operationalACS2.acs_url="https://fwa.cdp.isp.example/cwmpWeb/CPEMgt"
++uci set cwmpd.operationalACS2.acs_url="https://mobile.acs.isp.example:11201/cwmpWeb/WGCPEMgt"
 ```
 
 Più il consueto bump di versione/build (`etc/banner`, `etc/config/version`: `3401180`→`3401200`, 2024-09-26→2024-11-19; `etc/uci-defaults/tch_5000_versioncusto` aggiorna la tabella mapping per `2.4.5`) e i mapping WiFi/MultiAP/host già noti dal changelog prosa.

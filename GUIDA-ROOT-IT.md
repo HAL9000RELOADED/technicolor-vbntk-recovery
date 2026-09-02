@@ -32,7 +32,7 @@ AutoFlashGUI supporta più "metodi" di injection (endpoint diversi del pannello)
 | `root/afg_inject_ping.py` | `Ping` → `/modals/diagnostics-ping-modal.lp` (campo `ipAddress`), comando specifico DGA4130/1.0.3 | Stesso esito |
 | `root/afg_inject_basicddns.py` | `BasicDDNS` → `/dyndns.lp` (campo `ddns_domain`) | Stesso esito |
 
-**Conclusione**: tre endpoint diversi, stesso esito negativo, è un indizio abbastanza forte che TIM abbia sistemato questa classe di vulnerabilità di command injection nella versione 2.4.5 (le note di rooting originali erano per la 1.0.3, molto più vecchia).
+**Conclusione**: tre endpoint diversi, stesso esito negativo, è un indizio abbastanza forte che l'operatore abbia sistemato questa classe di vulnerabilità di command injection nella versione 2.4.5 (le note di rooting originali erano per la 1.0.3, molto più vecchia).
 
 ### Idea scartata: forzare la modalità BOOTP/TFTP per un downgrade
 
@@ -61,7 +61,7 @@ BOOTP).
 
 ## Successo: ripristino configurazione via interfaccia stock (nessun root richiesto)
 
-Analizzando le pagine del pannello admin (nessun link/pulsante di firmware upgrade risulta esposto da nessuna parte in questa skin TIM — probabilmente rimosso deliberatamente), si è trovato che il tile "Gateway" → tab "Configuration" espone comunque **Export/Import Configuration** nativi:
+Analizzando le pagine del pannello admin (nessun link/pulsante di firmware upgrade risulta esposto da nessuna parte in questa skin dell'operatore — probabilmente rimosso deliberatamente), si è trovato che il tile "Gateway" → tab "Configuration" espone comunque **Export/Import Configuration** nativi:
 
 ```
 POST /modals/system-config-modal.lp?action=import_config

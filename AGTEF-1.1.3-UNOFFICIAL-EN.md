@@ -1,6 +1,6 @@
 # AGTEF 1.1.3 — UNOFFICIAL build (root pre-enabled) derived from 1.0.3
 
-> ⚠️ **Disclaimer — read this first.** This firmware image **is not a genuine TIM/Technicolor stock release.** It is a **community-modified build**, derived from stock `1.0.3`, with root/shell access **deliberately pre-enabled**. It is documented here only for completeness and provenance tracking: it is **not** part of the official AGTEF version lineage covered in [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) and [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md), and must not be confused with it or slotted into an official changelog.
+> ⚠️ **Disclaimer — read this first.** This firmware image **is not a genuine ISP/Technicolor stock release.** It is a **community-modified build**, derived from stock `1.0.3`, with root/shell access **deliberately pre-enabled**. It is documented here only for completeness and provenance tracking: it is **not** part of the official AGTEF version lineage covered in [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) and [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md), and must not be confused with it or slotted into an official changelog.
 
 Byte-level analysis of the `1.1.3` image compared with the stock `1.0.3` it derives from. As in the rest of the repo, images are referred to only by version number (`1.0.3`, `1.1.3`), never by local file path.
 
