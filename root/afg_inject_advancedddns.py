@@ -1,7 +1,7 @@
 """Attempt root via AutoFlashGUI's "Advanced DDNS (Generic)" command-injection
 variant (ddns_domain field, /modals/wanservices-modal.lp).
 
-Result on AGTEF_2.4.5 (TIM VBNT-K / DGA4130): commands sent without any
+Result on AGTEF_2.4.5 (VBNT-K / DGA4130): commands sent without any
 transport error, but dropbear/SSH never came up afterwards -- see the guide
 for the other two variants also tried, and the conclusion that this class of
 injection appears to be patched in this firmware version.

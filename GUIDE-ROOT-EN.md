@@ -32,7 +32,7 @@ AutoFlashGUI supports several injection "methods" (different panel endpoints). T
 | `root/afg_inject_ping.py` | `Ping` → `/modals/diagnostics-ping-modal.lp` (`ipAddress` field), DGA4130/1.0.3-specific command | Same outcome |
 | `root/afg_inject_basicddns.py` | `BasicDDNS` → `/dyndns.lp` (`ddns_domain` field) | Same outcome |
 
-**Conclusion**: three different endpoints, same negative outcome — fairly strong evidence that TIM patched this class of command-injection vulnerability in version 2.4.5 (the original rooting notes were written against the much older 1.0.3).
+**Conclusion**: three different endpoints, same negative outcome — fairly strong evidence that the ISP patched this class of command-injection vulnerability in version 2.4.5 (the original rooting notes were written against the much older 1.0.3).
 
 ### Idea considered and dropped: forcing BOOTP/TFTP mode for a downgrade
 
@@ -60,7 +60,7 @@ bank targeting via BOOTP).
 
 ## Success: config restore via the stock UI (no root needed)
 
-Scanning the admin panel's pages (no firmware-upgrade link/button is exposed anywhere in this TIM-branded skin — likely deliberately removed), the "Gateway" tile's "Configuration" tab was found to still expose native **Export/Import Configuration**:
+Scanning the admin panel's pages (no firmware-upgrade link/button is exposed anywhere in this ISP-branded skin — likely deliberately removed), the "Gateway" tile's "Configuration" tab was found to still expose native **Export/Import Configuration**:
 
 ```
 POST /modals/system-config-modal.lp?action=import_config

@@ -58,11 +58,11 @@ What changes, version by version, across the 15 unique `.rbi` images found in th
 
 ## 2.4.4 → 2.4.5
 
-**0 removed, 3 added, 24 modified.** No busybox noise (only `bin/ps` among binaries). New files: two certificates (`etc/ssl/certs/4ec17c6c.0`, `etc/ssl/certs/TimGroupPrivateRootCA.b64.cer` — TIM adding its own private CA) and `usr/sbin/mon_reinit.sh`. Modified: `etc/banner`, `etc/config/cwmpd`, `etc/config/version`, `etc/init.d/wireless` + `etc/rc.d/S13wireless`, four `etc/uci-defaults/tch_*` entries (WAN network, removals, versioning, "LTE 2 Box" profile), `usr/bin/bulkdata`, WiFi/MultiAP/host mappings (`transformer/shared/wifi.lua`, `web/content_helper.lua`, several BBF/device2/rpc `.map` files), and `www/docroot/modals/system-info-modal.lp`. A targeted update around WiFi/MultiAP management, CWMP, and certificates — it does not touch security config (dropbear/passwd/shadow stay exactly as in `2.4.1`/`2.4.4`, both with SSH disabled).
+**0 removed, 3 added, 24 modified.** No busybox noise (only `bin/ps` among binaries). New files: two certificates (`etc/ssl/certs/4ec17c6c.0`, `etc/ssl/certs/TimGroupPrivateRootCA.b64.cer` — the ISP adding its own private CA) and `usr/sbin/mon_reinit.sh`. Modified: `etc/banner`, `etc/config/cwmpd`, `etc/config/version`, `etc/init.d/wireless` + `etc/rc.d/S13wireless`, four `etc/uci-defaults/tch_*` entries (WAN network, removals, versioning, "LTE 2 Box" profile), `usr/bin/bulkdata`, WiFi/MultiAP/host mappings (`transformer/shared/wifi.lua`, `web/content_helper.lua`, several BBF/device2/rpc `.map` files), and `www/docroot/modals/system-info-modal.lp`. A targeted update around WiFi/MultiAP management, CWMP, and certificates — it does not touch security config (dropbear/passwd/shadow stay exactly as in `2.4.1`/`2.4.4`, both with SSH disabled).
 
 ## 2.4.5 → 2.4.5_PATCHED — the local rooting patch
 
-**0 removed, 0 added, 3 modified.** The only transition in this list that isn't a TIM release, but the patch produced in this repository (`patch_245.sh`). It changes only:
+**0 removed, 0 added, 3 modified.** The only transition in this list that isn't an ISP release, but the patch produced in this repository (`patch_245.sh`). It changes only:
 
 - `etc/passwd`: root's shell from `/bin/restricted_shell` to `/bin/ash` (a full shell)
 - `etc/shadow`: from a locked root account (no password) to a known password (sha512crypt hash)

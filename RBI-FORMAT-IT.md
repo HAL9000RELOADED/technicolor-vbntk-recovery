@@ -1,6 +1,6 @@
 # Formato `.rbi` AGTEF: header, cifratura e "firma" — cosa cambia tra le versioni
 
-Analisi del contenitore firmware `.rbi` usato dal Technicolor VBNT-K (TIM, `AGTEF_x.y.z_CLOSED.rbi`), del meccanismo di cifratura/"firma" interno, e confronto reale tra le versioni `1.0.3` e `2.4.5` (originale vs patchata).
+Analisi del contenitore firmware `.rbi` usato dal Technicolor VBNT-K (`AGTEF_x.y.z_CLOSED.rbi`), del meccanismo di cifratura/"firma" interno, e confronto reale tra le versioni `1.0.3` e `2.4.5` (originale vs patchata).
 
 ## 1. Header statico
 

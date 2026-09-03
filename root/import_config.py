@@ -2,7 +2,7 @@
 Configuration feature -- no root/exploit needed, works on stock/patched
 firmware. Reverse-engineered from the "Configuration" tab under the
 Gateway tile's "System Information" modal (not linked from anywhere else
-in this TIM-branded UI, and with no manual firmware-upgrade option
+in this ISP-branded UI, and with no manual firmware-upgrade option
 alongside it -- see the guide).
 
 Usage: edit CONFIG_FILE below, then run from this directory (needs
