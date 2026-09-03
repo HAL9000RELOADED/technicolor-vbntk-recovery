@@ -34,7 +34,7 @@
 
 | | |
 |---|---|
-| Router | ISP-provided Technicolor VBNT-K (Technicolor DGA4130), Broadcom BCM63138, kernel 4.1.52, OpenWrt-derived ISP firmware ("AGTEF") |
+| Router | TIM - Technicolor VBNT-K (Technicolor DGA4130), Broadcom BCM63138, kernel 4.1.52, OpenWrt-derived ISP firmware ("AGTEF") |
 | Build toolchain | WSL2 + Debian, Docker (`ubuntu:18.04` base), OpenWrt 18.06-based buildroot for `brcm63xx-tch` / VBNT-K |
 | Recovery tools | [Wireshark](https://www.wireshark.org/), [Tftpd64](https://github.com/PJO2/tftpd64) (portable), Python 3 + [scapy](https://scapy.net/) |
 | Rooting attempt tools | [AutoFlashGUI](https://github.com/mswhirl/autoflashgui), `robobrowser` + `werkzeug<1.0` (isolated virtualenv) |
