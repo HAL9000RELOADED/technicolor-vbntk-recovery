@@ -200,6 +200,86 @@ OSCK/OSIK), quindi conoscere l'algoritmo non permette di decifrare il
 per questo qui non viene pubblicato alcun byte della chiave osservata, solo
 il meccanismo.
 
+### 4.2 Conferma pratica end-to-end su due backup reali dello stesso device (2026-09-09)
+
+Aggiornamento 2026-09-09: il meccanismo THENC descritto in §4.1 è ora
+**verificato funzionante end-to-end su un file reale** — non più solo dedotto
+dal sorgente Lua. Sono stati confrontati **due backup `config.bin` reali dello
+stesso device** (stesso `SERIALNUMBER`, stesso `MAC` `10:13:31:xx:xx:xx`,
+stesso `BUILDVERSION=AGTEF_2.4.5`) presi a distanza di ~8 mesi, decifrati
+usando la **vera chiave hardware del device** letta da `/proc/rip/0108`:
+
+- Entrambi i file: **HMAC-SHA1 valido** in fase di decifratura, cioè l'intera
+  catena `header ASCII → IV (16 byte) → AES-256-CBC → HMAC-SHA1`, con chiave
+  derivata da `/proc/rip/0108` (AES = primi 32 byte, HMAC = primi 64 byte),
+  è confermata corretta su dati veri. È la **prima conferma pratica** che il
+  meccanismo descritto a parole in §4.1 funziona davvero su un `config.bin`
+  genuino, non solo in teoria.
+- Header identico fra i due (stesso device): cambiano solo **IV** e **firma
+  HMAC** (attesi: dipendono dal contenuto e dall'IV casuale per-backup) e la
+  dimensione del payload cifrato.
+- Tool usato: `thenc_tool.py` (sottocomandi `parse`/`decrypt`/`diff`,
+  quest'ultimo con `--key-file` per il confronto in chiaro) — disponibile come
+  utility riusabile per ripetere l'operazione.
+
+**Riepilogo categorizzato di cosa cambia nel tempo** (NON un diff
+riga-per-riga, NESSUN valore reale riportato — solo il *tipo* di impostazioni,
+utile per sapere cosa aspettarsi nel contenuto decifrato di un device in uso):
+
+- **Hostname del device**: cambia dal default di fabbrica a un nome scelto
+  dall'utente.
+- **Sezione `[modgui]` (provisioning/modding)**: **presente o assente** a
+  seconda che il root/patch della GUI sia attivo o meno. Nel backup di un
+  device rootato compare l'intera sezione (flag di spoofing versione,
+  disabilitazione update CWMP, hash/credenziali della GUI moddata, elenco
+  app abilitate); nel backup "normale" non esiste. È l'indicatore più netto
+  della presenza del modding.
+- **Versione firmware della "banca passiva" dichiarata**
+  (`env.var.friendly_sw_version_passivebank`): cambia da una versione reale a
+  un valore fittizio molto alto (schema `x.99.99.99`). Interessante perché
+  sembra usato come **anti-downgrade-detection**: dichiarando una passiva già
+  "più recente", si scoraggia il provider/CWMP dal riportare il device a una
+  versione precedente presente nell'altro bank.
+- **Credenziali DDNS**: passano da **placeholder di default**
+  (`your_username` / `your_password` / `yourhost.example.com` / servizio
+  generico) a un servizio/hostname/credenziali reali configurati dall'utente.
+- **Profilo VoIP/SIP** (`mmpbxrvsipnet.sip_profile_0` e `sip_net`): passa da
+  **placeholder `line0`** (user/uri/password tutti = `line0`, profilo
+  disabilitato) a numero telefonico e credenziali reali, con il profilo
+  abilitato e i proxy/realm SIP del provider popolati.
+- **Livello e regole firewall**: cambia il livello dichiarato
+  (`firewall.fwconfig.level`, es. da `normal` a `lax`), l'input della zona WAN
+  (es. da `DROP` a `REJECT`), e compaiono/spariscono regole e port-forward
+  definiti dall'utente (redirect verso host LAN interni).
+- **Ruoli utente web** (`web.usr_*`): cambiano gli utenti definiti e i loro
+  ruoli (`admin` / `engineer` / `guest`), i verifier/salt SRP e il set di
+  regole/pagine accessibili nella UI — coerente con l'attivazione di una GUI
+  con privilegi diversi.
+- **Server NTP** (`system.ntp.server`): passa da **server interni dell'ISP**
+  (host `*.interbusiness.it` / `inrim.it`) a **pool pubblici**
+  (`pool.ntp.org`, `it.pool.ntp.org`).
+- **Chiave WiFi**: cambiata dall'utente (valore **non riportato qui**).
+- Vari altri toggle di servizio (UPnP/NAT-PMP, printer/file sharing, DLNA,
+  samba, watchdog, ecc.) cambiano di stato ma senza contenuto sensibile.
+
+**Finding tecnico — campi derivabili dal seriale vs campi solo-ACS**: nel
+contenuto decifrato si distinguono due classi di dati "utente":
+
+- Campi **ricostruibili localmente dal seriale del device**: p.es.
+  `network.wan.username` segue il pattern deterministico
+  `<SERIALNUMBER>-101331@<realm>` (dove `101331` deriva dalle prime cifre del
+  MAC/OUI del device). Questi non richiedono conoscenza esterna: dato il
+  seriale (che è nell'header THENC in chiaro) e il realm del provider, si
+  rigenerano.
+- Campi che arrivano **solo da un push TR-069/ACS del provider**: il profilo
+  SIP completo (numero telefonico, `display_name`, `password`/hash SIP, proxy
+  e realm effettivi) **non è derivabile da alcuna formula locale** — viene
+  scritto dal provider via provisioning ACS dopo la prima registrazione. Per
+  questo un backup preso *prima* del provisioning contiene solo i placeholder
+  `line0`, mentre uno preso *dopo* contiene il profilo reale. La distinzione
+  è utile: spiega perché alcuni segreti nel backup si possono predire dal
+  seriale e altri (quelli VoIP) no, sono opachi e dipendono dall'ACS.
+
 ## 5. Aperture / da verificare
 
 - `rawstorage` (256KB): scopo sconosciuto, nome troppo generico per
