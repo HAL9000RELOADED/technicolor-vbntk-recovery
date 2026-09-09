@@ -85,8 +85,147 @@ followed by the router rebooting on its own (~1 minute) to apply the imported co
 | Configuration restore | ✅ Succeeded, via a stock endpoint not documented publicly elsewhere |
 | Ansuel GUI installation | ⏸ Not done (requires root, not obtained) |
 
+See the update below though: root+GUI on 2.4.5 were reached anyway, via a
+different, indirect path from the direct injection above.
+
+## Update 2026-09-09: root reached indirectly (root 1.0.3 → bank planning → upgrade to 2.4.5 with root preserved)
+
+In a different session, the direct rooting attempt described above was
+sidestepped entirely by changing approach: **root the vulnerable firmware
+first (1.0.3), then carry the root through the upgrade to 2.4.5**, instead
+of trying to exploit 2.4.5 directly (patched, per above).
+
+Starting conditions: router on AGTEF_1.0.3, SSH closed, web UI rendered
+proper HTML/CSRF (no raw-Lua issue hit in this attempt).
+
+### Steps
+
+1. **Headless AutoFlashGUI injection** (same `libautoflashgui.mainScript`,
+   `Ping` method, the `DGA4130 TIM AGTEF_1.0.3`-specific command from
+   AutoFlashGUI's `defaults.ini`) → root SSH successfully enabled,
+   confirmed `uid=0`. This vulnerability class is still open on 1.0.3
+   (consistent with what's already documented elsewhere in this repo).
+2. **Bank planning**: real state read from `/proc/banktable/*` —
+   `booted=bank_2` (freshly rooted 1.0.3), `active=bank_1`, bank_1
+   **completely empty** (`0xFF` across all 64 bytes checked). Applied the
+   "flash directly into the empty bank" variant instead of
+   swap-then-erase (see
+   [`dga4130-root` README](https://github.com/HAL9000RELOADED/dga4130-root#bank-planning-quando-saltare-lo-swap-then-erase-variante-più-sicura)):
+   no overlay swap, rooted `bank_2` stays untouched as a fallback for the
+   whole procedure.
+3. Uploaded `AGTEF_2.4.5_CLOSED.rbi` (32,876,123 bytes) over an SSH exec
+   channel (`cat > /tmp/new.rbi`, not SFTP — this firmware's dropbear
+   doesn't expose the sftp subsystem), MD5 verified identical to the
+   local file.
+4. On-device unseal (`bli_parser`/`bli_unseal | dd bs=4 skip=1 seek=1`) →
+   `/tmp/new.bin` exactly 83,886,080 bytes = one bank's size
+   (`mtd3`/`mtd4`), confirming container integrity.
+5. Staged the same root-persistence `rc.local` block (see
+   `Root-DGA4130.ps1`) into `/overlay/bank_1/etc/rc.local`, MD5 verified.
+6. `mtd write /tmp/new.bin bank_1` + `echo bank_1 > /proc/banktable/active`
+   + reboot.
+7. Successful boot into `bank_1`: `rc.local` ran and self-deleted as
+   expected, root confirmed (`uid=0`).
+8. Uploaded + installed the Ansuel GUI (`GUI.tar.bz2`, MD5 verified) via
+   `bzcat | tar -C / -xvf - && /etc/init.d/rootdevice force`. **Practical
+   note**: both the unseal (step 4) and `rootdevice force` (this step) are
+   long-running (tens of seconds, the latter ~70s) and survive the SSH
+   channel that launched them being closed — if the SSH client times out,
+   the command keeps running on the modem regardless; check completion via
+   `ps` before treating it as failed.
+
+### GUI install confirmation
+
+```
+$ uci show modgui
+modgui.gui.gui_version='9.5.38-ba81e28c'
+modgui.gui.gui_hash='<uploaded GUI.tar.bz2's md5>'
+modgui.var.version_spoof_mode='enabled'
+modgui.var.isp_autodetect='1'
+modgui.var.isp='TIM'
+```
+Same "signature" (`modgui` UCI, `rootdevice`/`modgui_scripts` by Christian
+Marangi) already documented for the "martin router king" unit in
+`MEMORY-ARCHITECTURE-EN.md`.
+
+### Finding: the "AGTEF_2.4.5" label doesn't match the firmware's own internal version string
+
+The community-labeled file `AGTEF_2.4.5_CLOSED.rbi` (sha256
+`8fe8eb38531ac3f1cdc58671c5598885204a037d3db530a5230f476398b6a1f8`), once
+booted, reports `/etc/config/version`:
+```
+option version '19.4.1051-3401200-20241119103149-cf49b74e8c88c918fead0a0f9ad052f3283f4ee7'
+option marketing_name 'Damson'
+option marketing_version '19.4'
+```
+with `/etc/openwrt_release`: `DISTRIB_REVISION='r14144-e2ae576c18'`,
+`DISTRIB_TARGET='brcm6xxx-tch/VBNTJ_502L07p1'`, kernel `4.1.52`. The
+"AGTEF X.Y.Z" label used by the community/hack-technicolor to catalog
+files **does not match** TIM's own internal version string (same
+phenomenon already known for 1.0.3, which internally reports as
+`16.3.7636`) — useful to know for anyone trying to correlate a downloaded
+`.rbi` file with what the panel/SSH reports after flashing it.
+
+### Hardening against operator reclaim via ACS/CWMP: NOT present by default
+
+Verified on this unit (rooted, on 2.4.5/19.4.1051, with VDSL disconnected
+per the procedure): the TR-069 client (`cwmpd` + its `cwmpevents` Lua
+helper) is **active and enabled at boot** (`/etc/rc.d/S70cwmpd`) — rooting
+and installing the GUI **does not touch it**. `uci show cwmpd` exposes two
+operational ACS profiles:
+
+```
+cwmpd.cwmpd_config.acs_url='https://regman-tl.interbusiness.it:10700/acs/'
+cwmpd.cwmpd_config.acs_user='0018F6-Thomson-AGBasAdv'
+cwmpd.cwmpd_config.periodicinform_enable='0'
+cwmpd.operationalACS1.acs_url='https://regman-tl.interbusiness.it:10700/acs/'
+cwmpd.operationalACS1.acs_user='0018F6-Thomson-AGBasAdv'
+cwmpd.operationalACS1.connectionrequest_username='0018F6-Technicolor-CR-AG3play'
+cwmpd.operationalACS2.acs_url='https://mobile.acs.tim.it:11201/cwmpWeb/WGCPEMgt'
+cwmpd.operationalACS2.acs_user='fwacpedefaultusr'
+cwmpd.operationalACS2.connectionrequest_username='fwacpecrdefaultusr'
+cwmpd.operationalACS2.periodicinform_enable='1'
+cwmpd.operationalACS2.periodicinform_interval='3600'
+```
+(`acs_pass`/`connectionrequest_password` fields are present in the same
+output but deliberately omitted here — retrievable with the same
+`uci show cwmpd` command on a rooted unit, since they're stored in plain
+text in the device's own UCI config.)
+
+`operationalACS2` (`mobile.acs.tim.it`) has `periodicinform_enable='1'`
+with a **3600s** interval — this is TIM's "live" profile: once VDSL is
+reconnected, the modem will attempt a CWMP Inform to that host every hour,
+on its own initiative (CPE-initiated), regardless of any LAN-side
+firewall rule. Port 7547 (the ConnectionRequest listener, for *inbound*
+requests from the ACS) was found **not listening** at check time — so the
+operator could not force a connection at that exact moment — but this
+does not block the periodic **outbound** Inform, inside which the ACS can
+still issue standard CWMP RPCs (`Download`/firmware upgrade,
+`SetParameterValues`, `FactoryReset`, `Reboot`) within the session the CPE
+itself opened.
+
+A firewall rule `Deny_CWMP_Conn_Reqs_from_LAN` was also found, but it
+protects against spoofed ConnectionRequests **from the LAN side** — not
+hardening against the operator.
+
+**Conclusion: the device is NOT hardened against the operator reclaiming
+it.** As long as VDSL stays disconnected (already a standing precondition
+of this whole procedure, see the main guide) this is moot. The moment WAN
+comes back up, TIM's ACS has a working standard CWMP channel and could, at
+their policy's discretion, force a firmware update that silently reverts
+root. **Mitigation not yet applied on this unit**:
+`/etc/init.d/cwmpd disable; killall cwmpd cwmpevents` stops the client
+(at the cost of losing official ISP remote diagnostics/support) — it needs
+to be made persistent the same way root is (same `rc.local`/overlay
+mechanism), otherwise it comes back on the next clean boot or after any
+Download RPC received before disabling it. Alternatively, anyone who wants
+to keep VDSL connected can firewall-block the CPE's own outbound traffic
+to the ACS hosts listed above.
+
 ## Also see
 
 [`GUIDE-EN.md`](GUIDE-EN.md) — the firmware recovery guide that precedes this rooting attempt.
 
 [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) — analysis of the `.rbi` format used by these firmware images (header, AES encryption, "signature" block) and a comparison across the available versions.
+
+[`dga4130-root` repo](https://github.com/HAL9000RELOADED/dga4130-root) — the `Root-DGA4130.ps1` script and the bank-planning variant used in the update above.
