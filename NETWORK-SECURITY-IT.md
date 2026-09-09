@@ -146,7 +146,93 @@ ottenesse accesso in scrittura alla config potrebbe riattivare SSH WAN senza
 aggiungere nulla di nuovo. Coerente con l'evoluzione dropbear documentata in
 [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §3.2.
 
-## 7. Aperture / da verificare
+## 7. Broadpeak nanoCDN / MABR, il redirector IPTV — conflitto di bind tra due istanze (Osservato, 2026-09-09)
+
+`system.mabr.enabled = '1'`. `/etc/init.d/nanocdn` (procd) avvia **due**
+binari distinti dallo **stesso** file di configurazione condiviso
+(`/etc/broadpeak/nanocdn.conf`): `nanocdn-core` e `nanocdn-rr` ("Request
+Router"). Poiché entrambi leggono tutte le righe dello stesso file, ciascuno
+logga `unknown option` per i flag CLI che non riconosce (le opzioni
+dell'altro binario) — rumore atteso, non un errore.
+
+**`nanocdn-core` funziona correttamente**: stabile, build brandizzata TIM
+(`v2.6.2@5365-tim`), in ascolto su `18081`, risponde a `/nanocdnstatus.xml`,
+`/crossdomain.xml` e `/clientaccesspolicy.xml` con contenuto valido. La sua
+API proprietaria STB-agent (`BkStbA`, nelle stringhe compaiono
+`SetNewLiveChannel` e `/GetBkeServerList`) è raggiungibile, ma la sequenza di
+chiamate per richiedere un canale live non è stata decodificata in questa
+sessione (non documentata; nel binario sono presenti pattern in stile
+Flash/Silverlight "QualityLevels()/Fragments()" e manifest HLS/DASH, coerenti
+con supporto a Microsoft Smooth Streaming + HLS/DASH in output).
+
+**`nanocdn-rr` va in crash-loop continuo** (`ERROR could not bind to any
+interface`, rilanciato da `procd` ogni ~5s, `respawn 3600 5 0`). Escluse come
+cause, ciascuna verificata indipendentemente sull'unità live:
+- **Non** è il kill-switch anti-root dell'operatore:
+  `env.var.unlockedstatus = '0'` (questo metodo di root non fa scattare quel
+  flag, quindi la logica firmware `nanocdn stop`-su-unlock, presente altrove
+  negli uci-defaults di questa build, non si attiva mai).
+- **Non** sono certificati TLS mancanti: `/etc/broadpeak/certs/` ha una
+  bundle CA completa e intatta.
+- **Non** è irraggiungibilità del backend CDN: l'host CDN dell'operatore
+  referenziato in `smartlib-conf` è raggiungibile e risponde in HTTPS.
+- **Non** è un conflitto di porta TCP sul valore di `rr-nano-addr`:
+  cambiarlo (`18081` → `18082`) e riavviare il servizio non ha avuto
+  **alcun effetto** sull'errore — questo esclude che `rr-nano-addr` sia la
+  porta di ascolto propria di `nanocdn-rr`; è più probabile che sia
+  l'indirizzo con cui `nanocdn-rr` raggiunge `nanocdn-core` come upstream,
+  non qualcosa su cui fa bind.
+
+**Ipotesi residua meglio supportata**: entrambi i binari provano ad aprire il
+proprio "control channel multicast receiver" (stringa nel binario: `Control
+channel multicast receiver started on multicast '%s:%s'`) sull'identico
+valore `controlchannel-multicast=239.200.0.0:5004`, sulla stessa interfaccia
+(`br-lan`). `nanocdn-core` parte per primo (ordine nello script) e vince il
+bind; il tentativo successivo di `nanocdn-rr` fallisce, e il binario riporta
+un messaggio generico "any interface" invece di uno specifico "indirizzo già
+in uso" — plausibile se il socket multicast in ricezione non viene aperto con
+`SO_REUSEADDR`/`SO_REUSEPORT`. Questo è coerente con la suddivisione di ruoli
+documentata da Broadpeak stessa (`nanocdn-rr` è il "Request Router" di
+bilanciamento **tra più** istanze `nanocdn-core`, un pattern reale da
+CDN a scala) — su una CPE domestica single-box con esattamente una
+`nanocdn-core`, i due sono strutturalmente ridondanti e non sembrano
+progettati/testati per coesistere sullo stesso host/interfaccia.
+
+**Fix applicato su questa unità**: il blocco istanza `nanocdn-rr` è stato
+rimosso da `/etc/init.d/nanocdn` (`procd_open_instance nanocdn-rr` ...
+`procd_close_instance`), il blocco di `nanocdn-core` lasciato intatto (backup
+dello script originale conservato accanto). Confermato dopo il riavvio:
+`nanocdn-core` resta stabile e in ascolto su `18081`, nessun altro
+crash-loop, nessuna regressione funzionale osservata (il ruolo di redirector
+IPTV — quello effettivamente utile — non dipende dalla presenza di
+`nanocdn-rr`).
+
+## 8. ⚠️ `wifi-nurse-modal.lp` non è una GET di sola lettura sicura (Osservato, 2026-09-09)
+
+Una semplice `GET /modals/wifi-nurse-modal.lp` è stata osservata, su questa
+stessa classe di unità, innescare **logica di scrittura lato server** invece
+di restituire solo una pagina di stato: quando eseguita mentre la
+connettività WAN/ACS non è disponibile (es. durante lavoro di root/recovery
+con WAN scollegata di proposito, o qualunque altra condizione in cui i dati
+di branding attesi non sono raggiungibili), ha sovrascritto la config UCI
+`wireless` **live** — SSID **e** `wpa_psk_key`/`wep_key`/`wps_ap_pin` su tutte
+e quattro le sezioni `wifi-iface` — con la stringa placeholder di fabbrica del
+firmware `SET_BY_SCRIPT` (confermata hardcoded in `/etc/config/wireless` in
+diversi dump firmware studiati per questo repo, pensata per essere
+sovrascritta dal branding di prima attivazione). Questo ha fatto cadere ogni
+client WiFi associato (hanno visto l'SSID letteralmente rinominato) fino alla
+correzione.
+
+**Implicazione pratica per chi scansiona/enumera gli endpoint `.lp` di questa
+web UI** (vedi anche le linee guida sul pacing già stabilite per questa
+classe di webserver embedded Lua/nginx): trattare `wifi-nurse-modal.lp` — e
+per estensione qualunque altro endpoint il cui nome implichi un'azione attiva
+di "fix/nurse/diagnose" piuttosto che una visualizzazione passiva di stato —
+come un'operazione di **scrittura**, non una lettura sicura.
+`cwmpconf-modal.lp` (config CWMP/ACS) porta lo stesso tipo di rischio e
+andrebbe escluso dalle scansioni di routine per lo stesso motivo.
+
+## 9. Aperture / da verificare
 
 - Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
   companion, non confermato.
@@ -158,3 +244,11 @@ aggiungere nulla di nuovo. Coerente con l'evoluzione dropbear documentata in
 - Snapshot di una sola unità con firmware community: i valori del firewall e
   dei profili ACS potrebbero differire sullo stock TIM di fabbrica —
   non comparato in questa sessione.
+- Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
+  decodificato a sufficienza per richiedere e riprodurre davvero un canale
+  live — il formato esatto delle chiamate `SetNewLiveChannel`/
+  `GetBkeServerList` resta sconosciuto.
+- La causa interna esatta dell'effetto collaterale di scrittura config di
+  `wifi-nurse-modal.lp` (§8) — sotto quali condizioni scatta, e se sia
+  riproducibile deliberatamente — non è stata isolata ulteriormente:
+  osservata una volta, empiricamente, non forzata.

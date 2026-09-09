@@ -431,12 +431,12 @@ riconciliata nel repo ed è segnalata qui come aperta.
   — l'offset dello squashfs dentro l'immagine da 80MB varia per versione
   (vedi `RBI-FORMAT-IT.md` §3.2 per gli offset osservati su 221/245).
 - **Discrepanza kernel non ancora chiarita**: il log di boot del test del
-  2026-08-23 (firmware `AGTEF_2.2.1_CLOSED.rbi` da `F:\Modem`) mostra
+  2026-08-23 (firmware `AGTEF_2.2.1_CLOSED.rbi` dalla cartella locale dei firmware) mostra
   `Linux version 3.4.11-rt19 ... Mar 9 2017` — kernel della generazione
   1.0.3→2.0.1_003 secondo `RBI-FORMAT-IT.md` §3.4, che invece attribuisce a
   2.2.0/2.2.1 il kernel 4.1.38. Non è un errore della pipeline di build (il
   kernel viene riusato verbatim dall'header/payload originale, non toccato
-  dalla patch) — o il file sorgente in `F:\Modem` non è il vero 2.2.1, o
+  dalla patch) — o il file sorgente nella cartella locale dei firmware non è il vero 2.2.1, o
   l'attribuzione kernel→versione in §3.4 va rivista. Non ancora indagato.
 
   **Dato utile per chiarirla (2026-08-27)**: su **un'unità diversa**, live e

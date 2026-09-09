@@ -430,12 +430,12 @@ reconciled in the repo and is flagged here as open.
   image varies by version (see `RBI-FORMAT-EN.md` §3.2 for the offsets
   observed on 221/245).
 - **Unexplained kernel discrepancy**: the 2026-08-23 test's boot log
-  (firmware `AGTEF_2.2.1_CLOSED.rbi` from `F:\Modem`) shows
+  (firmware `AGTEF_2.2.1_CLOSED.rbi` from the local firmware folder) shows
   `Linux version 3.4.11-rt19 ... Mar 9 2017` — a kernel from the
   1.0.3→2.0.1_003 generation per `RBI-FORMAT-EN.md` §3.4, which instead
   attributes kernel 4.1.38 to 2.2.0/2.2.1. This isn't a build-pipeline
   error (the kernel is reused verbatim from the original header/payload,
-  untouched by the patch) — either the source file in `F:\Modem` isn't
+  untouched by the patch) — either the source file in the local firmware folder isn't
   genuinely 2.2.1, or the kernel→version mapping in §3.4 needs revisiting.
   Not yet investigated.
 
