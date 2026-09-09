@@ -309,6 +309,103 @@ regionale dell'ISP (host `dns-alice-<N>.interbusiness.it`, il numero cambia
 per centrale) ha dato risposte corrette in un caso osservato; non
 verificato se un DNS pubblico dia lo stesso risultato.
 
+### 4.3 Catalogo `/proc/rip/*` — 35 infoblock dati leggibili estratti e verificati (2026-09-09)
+
+Aggiornamento 2026-09-09: l'ipotesi di §4 (che `eripv2` contenga il materiale
+crittografico per-board) è ora concretizzata dall'enumerazione completa
+dell'interfaccia runtime `/proc/rip/*` — la **vista live** del sotto-sistema
+`rip`/`ripdrv` che espone il contenuto della partizione `eripv2` (§2/§4).
+Estratti in sola lettura (`cat | base64` via SSH) dall'unità rootata di §4.2,
+con **hash SHA-256 verificato identico locale/remoto su tutti e 35** gli
+infoblock dati (nessun troncamento in trasferimento).
+
+**Che cosa conta il numero 35.** Il **35** si riferisce esclusivamente ai
+**blocchi dati leggibili** effettivamente estratti via SSH e verificati con
+SHA-256 (locale=remoto su tutti) — sono i 35 codici elencati nella prima
+tabella qui sotto. Elencati **separatamente**, per sola completezza
+documentale, ci sono anche i **5 nodi di controllo**
+(`clean`/`encrypt`/`lock`/`new`/`signed`, mai letti né toccati in questa
+sessione) e la voce `0116` (**verificata assente** su questa unità): questi
+**non fanno parte del conteggio dei 35** e sono raccolti nella seconda tabella,
+così il totale resta inequivocabile.
+
+**Nessun byte di alcuna chiave, hash o certificato è riportato qui** (vincolo
+di scrub del repo). I blocchi già documentati altrove sono solo **referenziati,
+non duplicati**: `0108` (chiave "GW", cifratura `config.bin`) e `012b`
+(`rip_random_D`) → §4.1; `0120` (chiave pubblica RSA-2048 "OSIK") →
+[`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §6.
+
+**Tabella A — i 35 blocchi dati leggibili** (estratti e verificati SHA-256
+locale=remoto; è questo l'insieme a cui si riferisce il conteggio "35"):
+
+| Codice | Dim. reale | Permessi | Significato |
+|---|---|---|---|
+| `0002` | 2 B | `r--r--r--` | Flag hardware SFP (bit sul nibble alto) |
+| `0004` | 8 B | `r--r--r--` | PBA / numero di produzione |
+| `0010` | 2 B | `r--r--r--` | `sw_flag` |
+| `0012` | 9 B | `r--r--r--` | Numero di serie |
+| `0022` | 6 B | `r--r--r--` | Data di fabbrica (YYMMDD) |
+| `0028` | 2 B | `r--r--r--` | `fia` (form factor id) — già noto, usato in `platform_check_bliheader` (sotto-funzione di `platform_check_image_imp`, vedi [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §6.4) |
+| `0032` | 6 B | `r--r--r--` | MAC Ethernet |
+| `0038` | 4 B | `r--r--r--` | `company_id` |
+| `003c` | 2 B | `r--r--r--` | `factory_id` |
+| `0040` | 6 B | `r--r--r--` | Mnemonico board (`VBNT-K`) — già noto, usato nel check header BLI |
+| `0048` `0049` `004a` `004b` | 1 B ciascuno | `r--r--r--` | Non identificati |
+| `004c` | 6 B | `r--r--r--` | MAC USB |
+| `0083` | 288 B dichiarati (contenuto reale minore, vedi nota) | `r--------` | Modem Access Code |
+| `0088` | 288 B dichiarati | `r--------` | Non identificato, stessa dimensione di `0083` |
+| `008d` | 6 B | `r--r--r--` | MAC WiFi |
+| `0107` | 320 B dichiarati | `r--------` | "rndA" — Generic Access Key legacy |
+| `0108` | 352 B dichiarati | `r--------` | Chiave "GW" — **già documentata in dettaglio in §4.1** (cifratura `config.bin`) |
+| `0115` | 4 B | `r--r--r--` | Chip ID Broadcom raw |
+| `0119` | 256 B | `rw-r--r--` | Non identificato, pattern binario non testuale |
+| `011a.cert` | 7088 B | `r--------` | Certificato TLS client MQTT |
+| `011c` | 4 B | `r--r--r--` | Non identificato |
+| `0120` | 512 B dichiarati | `r--------` | **Chiave pubblica RSA-2048, alias "OSIK" = Operator Software Image Key** — verifica firma firmware, vedi [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §6 |
+| `0124` | 368 B dichiarati | `r--------` | "GAK" — Generic Access Key (10 chiavi × 8 B) |
+| `0127` | 512 B dichiarati | `r--------` | Non identificato, stessa dimensione di `0120` — **ipotesi non confermata**: seconda chiave RSA-2048 |
+| `0128` | 320 B dichiarati | `r--------` | Non identificato, stessa dimensione di `0107` |
+| `012a` | 2336 B dichiarati | `r--------` | Famiglia chiavi cifratura `config.bin` (con `0108`/`012b`) |
+| `012b` | 2336 B dichiarati | `r--------` | "rip_random_D" — **già documentata in §4.1** |
+| `012c` `012d` `012e` | 416 / 496 / 672 B dichiarati | `r--------` | Non identificati |
+| `8001` | 1 B | `rw-r--r--` | `product_id` (valore osservato: `0` = non provisionato) |
+| `8003` | 1 B | `rw-r--r--` | `variant_id` (valore osservato: `0`) |
+
+I codici elencati sopra sono esattamente 35 (`0048 0049 004a 004b` e
+`012c 012d 012e`, raggruppati in un'unica riga per compattezza, valgono per il
+conteggio come voci distinte).
+
+**Tabella B — voci elencate a parte, NON incluse nei 35** (nodi di controllo
+mai letti/toccati + slot verificato assente; qui solo per completezza
+documentale):
+
+| Codice | Dim. reale | Permessi | Significato |
+|---|---|---|---|
+| `0116` | **non esiste** su questa unità | — | Slot DSA legacy mai provisionato — vedi [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §6.3 (fallback firma DSA/SHA-1 inerte) |
+| `clean` `encrypt` `lock` `new` `signed` | 0 B | `rw-r--r--` | Nodi di controllo (non dati) — **mai letti/toccati** in questa sessione |
+
+**Nota tecnica — dimensione dichiarata vs reale.** Per i blocchi protetti
+(`r--------`), la dimensione **reale** del contenuto (`wc -c`, confermata
+dall'hash SHA-256 identico locale/remoto) è spesso **inferiore** alla
+dimensione dichiarata da `ls -la`/`stat()`. È un quirk noto degli pseudo-file
+`/proc` custom: `st_size` riflette il buffer interno del driver, non la
+lunghezza reale del dato generato. **Non è un errore di estrazione** — dove la
+tabella dice "dichiarati" si intende il valore di `stat()`, non il numero di
+byte effettivi.
+
+Questo catalogo sostituisce la caratterizzazione vaga di `eripv2` come blob da
+128 KB "non investigato" (§2/§4) con la mappa concreta del suo contenuto
+esposto a runtime. Restano non identificati diversi blocchi (elencati sopra),
+segnalati come tali e non come ipotesi.
+
+**Aperto / da riconciliare — `VBNT-K` vs `VBNTJ`.** L'infoblock `0040` letto
+qui riporta il mnemonico board `"VBNT-K"`, mentre altrove nel repo
+(`FIRMWARE-INTERNALS-IT.md`, `GUIDA-ROOT-IT.md`) l'unità 2.4.5 ha
+`DISTRIB_TARGET='brcm6xxx-tch/VBNTJ_502L07p1'`. Non è necessariamente una
+contraddizione — potrebbero essere due cose distinte (stringa target di build
+OpenWrt vs mnemonico board reale in RIP) — ma la discrepanza non è mai stata
+riconciliata nel repo ed è segnalata qui come aperta.
+
 ## 5. Aperture / da verificare
 
 - `rawstorage` (256KB): scopo sconosciuto, nome troppo generico per
