@@ -279,6 +279,35 @@ decrypted content two classes of "user" data can be distinguished:
   predicted from the serial and others (the VoIP ones) cannot — they are
   opaque and depend on the ACS.
 
+**How to find the SIP proxy and the correct DNS for telephony (a method, not a fixed value)**:
+SIP credentials (username/password or hash) aren't derivable by any
+formula, for the same reason as above — they have to be read from your own
+decrypted `config.bin` (field `mmpbxrvsipnet.sip_profile_0`) or via live
+UCI on a rooted unit (`uci show mmpbxrvsipnet`).
+
+TIM's outbound SIP proxy for telephony has a hostname of the form
+`d<NN>s<N>.co.imsw.telecomitalia.it`: the regional/exchange prefix — and
+therefore which DNS resolves it correctly — **varies territorially**.
+There is no single universal "right" DNS to write down here: your own
+proxy hostname has to come from your own config.bin, not be copied from an
+example.
+
+Method to resolve the actually-active IP (you need the SRV record, not
+just the hostname):
+1. `nslookup` from CMD → `set type=SRV`
+2. query `_sip._udp.<your-outbound-proxy>` (e.g.
+   `_sip._udp.d11s7.co.imsw.telecomitalia.it`)
+3. the answer gives two or more hostnames with a "priority": take the one
+   with the lowest priority
+4. `set type=A`, resolve that specific hostname → that's the IP to use
+
+The DNS to query for these steps should ideally be the one assigned by
+your own ISP via WAN DHCP (visible on a rooted unit in
+`/etc/resolv.conf.auto`), not a generic public resolver — a regional ISP
+DNS (host `dns-alice-<N>.interbusiness.it`, the number varies by exchange)
+gave correct answers in one observed case; not verified whether a public
+DNS gives the same result.
+
 ## 5. Open questions / to verify
 
 - `rawstorage` (256KB): unknown purpose, name too generic to guess from —

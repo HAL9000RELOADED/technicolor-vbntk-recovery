@@ -280,6 +280,35 @@ contenuto decifrato si distinguono due classi di dati "utente":
   è utile: spiega perché alcuni segreti nel backup si possono predire dal
   seriale e altri (quelli VoIP) no, sono opachi e dipendono dall'ACS.
 
+**Come trovare il proxy SIP e il DNS corretto per la fonia (metodo, non un valore fisso)**:
+le credenziali SIP (utente/password o hash) non sono derivabili da nessuna
+formula, per lo stesso motivo del punto sopra — vanno lette dal proprio
+`config.bin` decifrato (campo `mmpbxrvsipnet.sip_profile_0`) o via UCI live
+su un'unità rootata (`uci show mmpbxrvsipnet`).
+
+Il proxy SIP in uscita per la fonia TIM ha un hostname del tipo
+`d<NN>s<N>.co.imsw.telecomitalia.it`: il prefisso regionale/di centrale — e
+quindi anche quale DNS risolve correttamente — **varia su base
+territoriale**. Non esiste un DNS "giusto" universale da scrivere qui: il
+proprio hostname proxy va preso dal proprio config.bin, non copiato da un
+esempio.
+
+Metodo per risolvere l'IP realmente attivo (serve il record SRV, non solo
+l'hostname):
+1. `nslookup` da CMD → `set type=SRV`
+2. query `_sip._udp.<il-tuo-outbound-proxy>` (es.
+   `_sip._udp.d11s7.co.imsw.telecomitalia.it`)
+3. la risposta dà due o più hostname con "priority": prendi quello con
+   priority più bassa
+4. `set type=A`, risolvi quell'hostname specifico → è l'IP da usare
+
+Il DNS da interrogare per questi passaggi conviene sia quello assegnato dal
+proprio ISP via DHCP sulla WAN (visibile su un'unità rootata in
+`/etc/resolv.conf.auto`), non un resolver pubblico generico — un DNS
+regionale dell'ISP (host `dns-alice-<N>.interbusiness.it`, il numero cambia
+per centrale) ha dato risposte corrette in un caso osservato; non
+verificato se un DNS pubblico dia lo stesso risultato.
+
 ## 5. Aperture / da verificare
 
 - `rawstorage` (256KB): scopo sconosciuto, nome troppo generico per
