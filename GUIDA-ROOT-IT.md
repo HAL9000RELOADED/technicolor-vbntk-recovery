@@ -225,6 +225,41 @@ dopo un eventuale Download RPC ricevuto prima di disabilitarlo. In
 alternativa, chi vuole tenere il VDSL collegato può bloccare via firewall
 il traffico in uscita del CPE verso gli host ACS sopra elencati.
 
+## 2026-09-09: autenticazione SSH a chiave pubblica — non funziona con ED25519, serve RSA + flag legacy lato client
+
+Su un'unità già rootata (dropbear `2019.78`, config `afg` con `RootPasswordAuth=on`, `RootLogin=1`, porta 22 solo LAN — vedi sopra), tentare di sostituire il login a password con una chiave pubblica sembra a prima vista fallire per qualunque tipo di chiave: `Permission denied (publickey,password)` sia scrivendo in `/etc/dropbear/authorized_keys` sia in `/root/.ssh/authorized_keys` (questo dropbear controlla entrambi i percorsi — non fa differenza, meglio comunque popolarli entrambi). Il sospetto naturale è un problema di percorso/overlay (questo firmware ha un overlayfs aggiuntivo montato da un mod GUI, sopra il normale overlay OpenWrt), ma non è quello.
+
+**Diagnosi**: per isolare la causa, invece di modificare l'istanza dropbear già attiva (rischioso — è l'unico canale root funzionante), è stata lanciata una seconda istanza dello stesso identico binario `/usr/sbin/dropbear` già presente sul device, in foreground con `timeout` (auto-terminante, nessuno stato persistente), su una porta libera diversa, riusando le host key esistenti:
+
+```sh
+timeout 20 /usr/sbin/dropbear -F -p <ip>:<porta-libera> \
+  -r /etc/dropbear/dropbear_rsa_host_key -r /etc/dropbear/dropbear_ecdsa_host_key
+```
+
+Il log di questa istanza (visibile con `-F`, foreground) mostra la vera causa:
+
+```
+Pubkey auth attempt with unknown algo for 'root' from <ip>:<porta>
+```
+
+**Causa reale, in due parti (non un problema di percorso/overlay):**
+
+1. **ED25519 non è supportato** da questo dropbear `2019.78` come algoritmo di chiave utente — viene rifiutato a monte, prima ancora di controllare `authorized_keys`.
+2. Passando a una chiave **RSA**, il rifiuto cambia forma: un client OpenSSH moderno (8.8+) rifiuta di *offrire* la vecchia firma `ssh-rsa` (SHA-1), disabilitata di default per motivi di sicurezza, e questo dropbear non implementa l'estensione più recente RFC 8332 (`rsa-sha2-256`/`512`). Risultato: nessun algoritmo di firma in comune (`no mutual signature algorithm`, log lato client, prima ancora di contattare il server).
+
+**Soluzione**: chiave RSA (non ED25519) + forzare esplicitamente l'algoritmo legacy lato client:
+
+```sh
+ssh-keygen -t rsa -b 2048 -f ~/.ssh/id_dga4130
+# aggiungere la pubkey sia a /etc/dropbear/authorized_keys che a /root/.ssh/authorized_keys
+
+ssh -o PubkeyAcceptedAlgorithms=+ssh-rsa -i ~/.ssh/id_dga4130 root@<ip>
+```
+
+(su client OpenSSH più vecchi l'opzione equivalente è `PubkeyAcceptedKeyTypes` invece di `PubkeyAcceptedAlgorithms`.)
+
+Non serve alcun secondo servizio SSH persistente: una volta capito il vincolo di algoritmo, la chiave funziona direttamente sull'istanza `afg` già attiva sulla porta 22 — l'istanza di test sulla porta libera è servita solo come diagnostica isolata e si è auto-terminata dopo 20s (`timeout`), nessuna modifica permanente.
+
 ## Vedi anche
 
 [`GUIDA-IT.md`](GUIDA-IT.md) — la guida di recovery firmware che precede questo tentativo di rooting.
