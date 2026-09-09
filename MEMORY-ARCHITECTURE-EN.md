@@ -296,7 +296,7 @@ Method to resolve the actually-active IP (you need the SRV record, not
 just the hostname):
 1. `nslookup` from CMD → `set type=SRV`
 2. query `_sip._udp.<your-outbound-proxy>` (e.g.
-   `_sip._udp.d11s7.co.imsw.telecomitalia.it`)
+   `_sip._udp.d<NN>s<N>.co.imsw.telecomitalia.it`)
 3. the answer gives two or more hostnames with a "priority": take the one
    with the lowest priority
 4. `set type=A`, resolve that specific hostname → that's the IP to use
@@ -307,6 +307,102 @@ your own ISP via WAN DHCP (visible on a rooted unit in
 DNS (host `dns-alice-<N>.interbusiness.it`, the number varies by exchange)
 gave correct answers in one observed case; not verified whether a public
 DNS gives the same result.
+
+### 4.3 `/proc/rip/*` catalog — 35 readable data infoblocks extracted and verified (2026-09-09)
+
+Update 2026-09-09: the §4 hypothesis (that `eripv2` holds the per-board
+cryptographic material) is now made concrete by a full enumeration of the
+`/proc/rip/*` runtime interface — the **live view** of the `rip`/`ripdrv`
+sub-system that exposes the content of the `eripv2` partition (§2/§4).
+Extracted read-only (`cat | base64` over SSH) from the rooted unit of §4.2,
+with the **SHA-256 hash verified identical local/remote across all 35**
+data infoblocks (no truncation in transfer).
+
+**What the number 35 counts.** The **35** refers exclusively to the
+**readable data blocks** that were actually extracted over SSH and verified
+with SHA-256 (local=remote on all of them) — they are the 35 codes listed in
+the first table below. Listed **separately**, purely for documentary
+completeness, are also the **5 control nodes**
+(`clean`/`encrypt`/`lock`/`new`/`signed`, never read or touched in this
+session) and the `0116` entry (**verified absent** on this unit): these are
+**not part of the count of 35** and are collected in the second table, so the
+total stays unambiguous.
+
+**No byte of any key, hash or certificate is reproduced here** (repo scrub
+constraint). Blocks already documented elsewhere are only **referenced, not
+duplicated**: `0108` ("GW" key, `config.bin` encryption) and `012b`
+(`rip_random_D`) → §4.1; `0120` (RSA-2048 public key "OSIK") →
+[`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §6.
+
+**Table A — the 35 readable data blocks** (extracted and verified SHA-256
+local=remote; this is the set the count "35" refers to):
+
+| Code | Real size | Perms | Meaning |
+|---|---|---|---|
+| `0002` | 2 B | `r--r--r--` | SFP hardware flag (bit in the high nibble) |
+| `0004` | 8 B | `r--r--r--` | PBA / production number |
+| `0010` | 2 B | `r--r--r--` | `sw_flag` |
+| `0012` | 9 B | `r--r--r--` | Serial number |
+| `0022` | 6 B | `r--r--r--` | Factory date (YYMMDD) |
+| `0028` | 2 B | `r--r--r--` | `fia` (form factor id) — already known, used in `platform_check_bliheader` (sub-function of `platform_check_image_imp`, see [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §6.4) |
+| `0032` | 6 B | `r--r--r--` | Ethernet MAC |
+| `0038` | 4 B | `r--r--r--` | `company_id` |
+| `003c` | 2 B | `r--r--r--` | `factory_id` |
+| `0040` | 6 B | `r--r--r--` | Board mnemonic (`VBNT-K`) — already known, used in the BLI header check |
+| `0048` `0049` `004a` `004b` | 1 B each | `r--r--r--` | Unidentified |
+| `004c` | 6 B | `r--r--r--` | USB MAC |
+| `0083` | 288 B declared (real content smaller, see note) | `r--------` | Modem Access Code |
+| `0088` | 288 B declared | `r--------` | Unidentified, same size as `0083` |
+| `008d` | 6 B | `r--r--r--` | WiFi MAC |
+| `0107` | 320 B declared | `r--------` | "rndA" — legacy Generic Access Key |
+| `0108` | 352 B declared | `r--------` | "GW" key — **already documented in detail in §4.1** (`config.bin` encryption) |
+| `0115` | 4 B | `r--r--r--` | Raw Broadcom chip ID |
+| `0119` | 256 B | `rw-r--r--` | Unidentified, non-textual binary pattern |
+| `011a.cert` | 7088 B | `r--------` | MQTT client TLS certificate |
+| `011c` | 4 B | `r--r--r--` | Unidentified |
+| `0120` | 512 B declared | `r--------` | **RSA-2048 public key, alias "OSIK" = Operator Software Image Key** — firmware signature verification, see [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §6 |
+| `0124` | 368 B declared | `r--------` | "GAK" — Generic Access Key (10 keys × 8 B) |
+| `0127` | 512 B declared | `r--------` | Unidentified, same size as `0120` — **unconfirmed hypothesis**: a second RSA-2048 key |
+| `0128` | 320 B declared | `r--------` | Unidentified, same size as `0107` |
+| `012a` | 2336 B declared | `r--------` | `config.bin` encryption key family (with `0108`/`012b`) |
+| `012b` | 2336 B declared | `r--------` | "rip_random_D" — **already documented in §4.1** |
+| `012c` `012d` `012e` | 416 / 496 / 672 B declared | `r--------` | Unidentified |
+| `8001` | 1 B | `rw-r--r--` | `product_id` (observed value: `0` = not provisioned) |
+| `8003` | 1 B | `rw-r--r--` | `variant_id` (observed value: `0`) |
+
+The codes listed above are exactly 35 (`0048 0049 004a 004b` and
+`012c 012d 012e`, grouped into a single row for compactness, count as distinct
+entries).
+
+**Table B — entries listed separately, NOT included in the 35** (control
+nodes never read/touched + the slot verified absent; here only for documentary
+completeness):
+
+| Code | Real size | Perms | Meaning |
+|---|---|---|---|
+| `0116` | **does not exist** on this unit | — | Legacy DSA slot, never provisioned — see [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §6.3 (inert DSA/SHA-1 signature fallback) |
+| `clean` `encrypt` `lock` `new` `signed` | 0 B | `rw-r--r--` | Control nodes (not data) — **never read/touched** in this session |
+
+**Technical note — declared vs real size.** For the protected blocks
+(`r--------`), the **real** content size (`wc -c`, confirmed by the identical
+local/remote SHA-256 hash) is often **smaller** than the size declared by
+`ls -la`/`stat()`. This is a known quirk of custom `/proc` pseudo-files:
+`st_size` reflects the driver's internal buffer, not the actual length of the
+data generated. **It is not an extraction error** — where the table says
+"declared" it means the `stat()` value, not the effective byte count.
+
+This catalog replaces the vague characterization of `eripv2` as a 128 KB
+"not investigated" blob (§2/§4) with a concrete map of its runtime-exposed
+content. Several blocks remain unidentified (listed above), flagged as such
+and not as hypotheses.
+
+**Open / to reconcile — `VBNT-K` vs `VBNTJ`.** Infoblock `0040` read here
+reports the board mnemonic `"VBNT-K"`, whereas elsewhere in the repo
+(`FIRMWARE-INTERNALS-EN.md`, `GUIDE-ROOT-EN.md`) the 2.4.5 unit has
+`DISTRIB_TARGET='brcm6xxx-tch/VBNTJ_502L07p1'`. This is not necessarily a
+contradiction — they could be two distinct things (an OpenWrt build target
+string vs the real RIP board mnemonic) — but the discrepancy has never been
+reconciled in the repo and is flagged here as open.
 
 ## 5. Open questions / to verify
 
@@ -334,12 +430,12 @@ DNS gives the same result.
   image varies by version (see `RBI-FORMAT-EN.md` §3.2 for the offsets
   observed on 221/245).
 - **Unexplained kernel discrepancy**: the 2026-08-23 test's boot log
-  (firmware `AGTEF_2.2.1_CLOSED.rbi` from `F:\Modem`) shows
+  (firmware `AGTEF_2.2.1_CLOSED.rbi` from the local firmware folder) shows
   `Linux version 3.4.11-rt19 ... Mar 9 2017` — a kernel from the
   1.0.3→2.0.1_003 generation per `RBI-FORMAT-EN.md` §3.4, which instead
   attributes kernel 4.1.38 to 2.2.0/2.2.1. This isn't a build-pipeline
   error (the kernel is reused verbatim from the original header/payload,
-  untouched by the patch) — either the source file in `F:\Modem` isn't
+  untouched by the patch) — either the source file in the local firmware folder isn't
   genuinely 2.2.1, or the kernel→version mapping in §3.4 needs revisiting.
   Not yet investigated.
 

@@ -76,6 +76,8 @@ Verifica sui 3 file (hash dichiarato nell'header vs hash ricalcolato sul payload
 
 **Conclusione:** non esiste, in questo formato, una firma crittografica legata a una chiave privata Technicolor che impedisca di costruire un file `.rbi` "valido" con un payload arbitrario — il solo controllo di consistenza interno (l'hash `0xB8`) viene ricalcolato correttamente da chiunque usi lo stesso toolchain di impacchettamento, come dimostra il fatto che la versione patchata (`2.4.5_PATCHED`) supera questo controllo esattamente come l'originale. Se la CFE del router verifica effettivamente questo campo (o altro, es. campi header) durante il boot/recovery resta una domanda separata, legata al bootloader stesso e non al formato file.
 
+> **Aggiornamento 2026-09-09 — attenzione a non confondere due meccanismi distinti.** L'hash `0xB8` descritto qui è un digest di autoconsistenza *interno al file*. Esiste però, sul **device** (lato Linux/userspace), una verifica firma completamente separata e questa **sì** è a chiave pubblica RSA-2048/PSS — confermata a livello di codice macchina disassemblando i binari reali dell'unità. Opera sull'header+payload BLI, non sul chunk `0xB8`. Vedi il nuovo [§6](#6-verifica-firma-lato-device--confermata-a-livello-di-codice-macchina-2026-09-09).
+
 ### 2.3 Livello 0xB4/0xB0
 
 `0xB4`: `magic(1) + "MUTE"(4) + flag(1) + counter(4) + dati_zlib`. `0xB0`: `magic(1) + "MUTE"(4) + flag(1) + payload_in_chiaro` — l'immagine flash finale, 80 MB (`0x5000000`) su tutti i file testati.
@@ -86,7 +88,9 @@ Analisi estesa a tutte le **13 immagini uniche** trovate in cartella (dedup per 
 
 ### 3.1 Verifica firma — universale su tutte e 13
 
-Il controllo byte-per-byte descritto al §2.2 (`hash 0xB8 == SHA-256(chunk 0xB4)`) è stato ripetuto su tutte e 13 le immagini, patch inclusa: **match positivo su tutte**, nessuna eccezione. Conferma definitiva che il meccanismo non è mai stato una firma a chiave privata in nessuna versione della linea AGTEF osservata.
+Il controllo byte-per-byte descritto al §2.2 (`hash 0xB8 == SHA-256(chunk 0xB4)`) è stato ripetuto su tutte e 13 le immagini, patch inclusa: **match positivo su tutte**, nessuna eccezione. Conferma definitiva che **questo** meccanismo (l'hash interno al file) non è mai stato una firma a chiave privata in nessuna versione della linea AGTEF osservata.
+
+Da distinguere nettamente dalla verifica firma **lato device**, che è invece una vera RSA-2048/PSS (chiave pubblica letta da `/proc/rip/0120`, alias "OSIK") e che si applica a header+payload BLI, non al chunk `0xB8`: vedi [§6](#6-verifica-firma-lato-device--confermata-a-livello-di-codice-macchina-2026-09-09) per l'analisi a livello di codice macchina.
 
 ### 3.2 SSH (dropbear) — evoluzione nel tempo
 
@@ -285,3 +289,147 @@ identico hard-reset era già stato provato in passato su questo router per un
 problema diverso (§10.1 della documentazione di recovery locale, non ancora
 pubblicata qui) senza risolverlo, quindi non è garantito che svuoti davvero
 `rootfs_data` su questo hardware.
+
+## 6. Verifica firma lato device — confermata a livello di codice macchina (2026-09-09)
+
+Le sezioni §2.2/§3.1 riguardano l'hash di autoconsistenza `0xB8` **dentro il
+file** `.rbi`: un semplice SHA-256, ricalcolabile da chiunque, che non è
+autenticazione. Restava aperta la domanda posta in §2.2 — esiste, nel
+**device**, una vera verifica a chiave pubblica del firmware? Questa sessione
+la risponde disassemblando i binari reali estratti in sola lettura da
+un'unità fisica rootata (root via SSH, firmware community della famiglia
+AGTEF 2.4.5, kernel 4.1.52; stessa unità di
+[`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.2).
+
+**Risposta: sì, esiste — ed è RSA-2048/PSS standard OpenSSL, non manomessa.**
+È un meccanismo indipendente dal formato del contenitore: opera su
+header+payload BLI, non sul chunk `0xB8`. Prima d'ora nel repo era
+presumibilmente noto solo per comportamento a scatola nera (test SIGTEST);
+qui è confermato leggendo direttamente il codice macchina.
+
+### 6.1 Binari e algoritmo (Osservato — disassemblaggio ARM)
+
+Binari analizzati (ELF ARM dinamici, **non-stripped**, pacchetto `blitools`
+v1.0), estratti in sola lettura dal filesystem dell'unità:
+
+| Binario | Dimensione | Ruolo |
+|---|---|---|
+| `signature_checker` | 13612 B | orchestratore della verifica |
+| `bli_unseal_rsa_helper` | 9516 B | operazioni RSA (OpenSSL) |
+| `bli_parser` | 5420 B | parsing dei campi header BLI |
+
+> **Nota naming — `bli_unseal_rsa` vs `bli_unseal_rsa_helper`.** Sono due
+> entità reali e distinte, non un'incoerenza: `bli_unseal_rsa_helper` (in
+> tabella) è il **vero binario ELF** — quello effettivamente disassemblato
+> qui. Viene invocato da un piccolo **script wrapper shell da 128 byte** di
+> nome `bli_unseal_rsa`, che si limita a
+> `dd bs=1 count=5 &>/dev/null; exec bli_unseal_rsa_helper | bli_unseal`.
+> Quindi: `bli_unseal_rsa` = wrapper script → `bli_unseal_rsa_helper` =
+> binario reale.
+
+Algoritmo esatto ricostruito dal disassemblato:
+
+1. `SHA-256` sul contenuto (header + payload).
+2. `RSA_public_decrypt(..., padding = RSA_NO_PADDING)` sui 256 byte di firma
+   (RSA-2048).
+3. `RSA_verify_PKCS1_PSS(hash = SHA256, salt = auto)`.
+
+Sono tutte chiamate OpenSSL standard, senza alcuna modifica al codice
+crittografico. **Nessun bypass presente nel binario**: nessun `getenv`
+importato, nessuna stringa sospetta di tipo `debug`/`skip`/backdoor. Se manca
+il materiale di verifica il binario fa `exit(1)` (fail-closed, vedi §6.3), non
+prosegue silenziosamente.
+
+### 6.2 "OSIK" risolto — Operator Software Image Key (Osservato)
+
+La chiave pubblica di verifica è letta da `/proc/rip/0120` (oppure da un file
+passato con `-k`): 512 byte, permessi `-r--------` (vedi il catalogo completo
+in [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.3).
+
+`MEMORY-ARCHITECTURE-IT.md` §4 citava già `OSIK` come uno dei nomi visti nel
+tool esterno [`pedro-n-rocha/secr`](https://github.com/pedro-n-rocha/secr), ma
+**senza l'espansione dell'acronimo**. Questa sessione la fornisce, come
+**prima conferma diretta**: lo script reale `/usr/sbin/rip-create-efu.sh`
+presente nel filesystem del firmware contiene la riga di alias che lega la
+chiave RSA di `/proc/rip/0120` al nome **OSIK = "Operator Software Image
+Key"**. Nessun byte della chiave è riportato qui (vincolo di scrub del repo).
+
+### 6.3 Fallback DSA/SHA-1 — presente nel codice, inerte su questo hardware (Osservato)
+
+Il disassemblato mostra un percorso di fallback: se `/proc/rip/0120` non è
+apribile, `signature_checker` prova `/proc/rip/0116` e, se presente, verifica
+con **DSA + SHA-1** (schema più debole) invece di RSA-PSS/SHA-256. Se **nessuno
+dei due** blocchi esiste, fa `exit(1)` — fail-closed, nessuna verifica
+bypassata.
+
+**Verificato empiricamente sull'unità reale**: `/proc/rip/0116` **non esiste**
+su questo device (esiste solo `0120`, vedi
+[`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.3). Quindi il ramo
+DSA/SHA-1 più debole è **presente nel codice ma inerte** su un hardware di
+produzione normale: lo slot `0116` non è mai stato provisionato. Vale la pena
+segnalarlo perché, su un'ipotetica unità in cui `0120` fosse illeggibile ma
+`0116` popolato, la verifica ricadrebbe su un algoritmo significativamente più
+debole — non il caso qui, ma un'assunzione da non dare per scontata su altre
+schede/varianti.
+
+### 6.4 Stesso meccanismo riusato nel path di aggiornamento userspace (fatto NUOVO)
+
+Scoperta non ancora documentata in nessun file del repo: **lo stesso identico
+`signature_checker`/`bli_unseal_rsa_helper`/`bli_parser` viene richiamato
+anche dal path di aggiornamento userspace**, non solo nel contesto
+bootloader. La catena è:
+
+```
+sysupgrade-safe → /sbin/sysupgrade --safe
+               → platform_check_image_imp()  (in /lib/upgrade/platform.sh)
+               → signature_checker            (in streaming, mentre scrive il bank inattivo)
+```
+
+Oltre alla firma RSA, `platform_check_image_imp` esegue — tramite la sua
+sotto-funzione interna `platform_check_bliheader` — un **controllo separato
+dei campi header BLI** (`fia` / `fim` / `boardname` / `prodid` / `varid`)
+confrontandoli con i corrispondenti infoblock del device:
+`/proc/rip/0028`, `/proc/rip/0040`, `/proc/rip/8001`, `/proc/rip/8003` (vedi
+[`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.3 per il
+significato di questi codici) — cioè un'immagine per una board/variante
+sbagliata viene rifiutata a prescindere dalla firma.
+
+Esiste un flag di bypass, `--nosig` / `IGNORE_SIGNATURE=1`, nello script
+wrapper, **etichettato esplicitamente dagli sviluppatori "for development
+only"**. Importante: salta **solo** la chiamata a `signature_checker`, **non**
+gli altri controlli (campi header, dimensione). Non è quindi un "flash
+qualsiasi cosa": disabilita la sola verifica crittografica, lasciando in piedi
+i controlli di compatibilità hardware.
+
+### 6.5 Terzo livello (`validate_firmware_image` / `ucert`) — presente ma vuoto (Osservato)
+
+`/usr/libexec/validate_firmware_image` referenzia il meccanismo standard
+OpenWrt `fwtool` / `ucert` (firma "usign"). Su questo device però
+`/usr/bin/ucert` **non esiste** e `/etc/opkg/keys/` **non esiste**: questo
+livello è di fatto un guscio vuoto, mai realmente attivo. La verifica reale
+del firmware su questa unità passa quindi per il meccanismo RSA/PSS di §6.1,
+non per `ucert`.
+
+### 6.6 Aperture / relazione con §5.3
+
+- **Tensione con §5.3, non ancora chiarita.** In §5.3 un `.rbi` costruito da
+  zero con la sola OSCK pubblica (nessuna firma RSA privata) è stato
+  **flashato con successo via recovery BOOTP/TFTP** e ha bootato pulito. La
+  verifica RSA-2048/PSS descritta qui vive nei binari **userspace/Linux**
+  (`signature_checker`) ed è chiamata dal path `sysupgrade`, che è un percorso
+  **diverso** dalla recovery BOOTP/TFTP gestita dalla CFE. La lettura più
+  coerente con entrambi i dati è che i **due percorsi di scrittura del bank
+  siano governati da controlli distinti**: `sysupgrade` (Linux) applica la
+  firma RSA di §6.1, mentre il flash di recovery a livello CFE evidentemente
+  **non** la applica (o applica solo controlli più deboli), coerente con la
+  conclusione empirica di §5.3. Non verificato: non è stato disassemblato il
+  codice CFE stesso in questa sessione — l'analisi qui riguarda i binari
+  Linux. Resta quindi possibile, ma non dimostrato, che esista una verifica
+  anche nella CFE che in §5.3 è stata soddisfatta per altra via (es. header
+  riusato verbatim da un'immagine genuina).
+- Non verificato se `signature_checker` sia invocato anche in fase di
+  boot/attivazione del bank (oltre che in scrittura via `sysupgrade`).
+- `/proc/rip/0127` ha la stessa dimensione dichiarata di `/proc/rip/0120`
+  (512 B): ipotesi non confermata che sia una **seconda chiave RSA-2048**
+  (vedi [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.3) — non
+  è referenziata da `signature_checker` nei path osservati.
