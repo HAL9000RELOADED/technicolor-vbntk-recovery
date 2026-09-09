@@ -121,22 +121,30 @@ client certificate is the `/proc/rip/011a.cert` infoblock, see
 used for companion-app pairing. **Hypothesis**, the broker's exact consumer
 not verified.
 
-### 6.3 Dropbear — `wan`/`afg` profiles with dormant capability
+### 6.3 Dropbear — `wan` (WAN, dormant) and `afg` (LAN, active) profiles
 
-The dropbear configuration contains `wan` and `afg` profiles with root-login
-enabled **in the config**, but the `wan` profile is **disabled**:
+The dropbear configuration contains two distinct profiles with root-login
+enabled, not to be confused with each other:
+
+- **`afg`** — restricted to `Interface='lan'`: not reachable from
+  Internet/WAN. This is the **active** profile, used for the SSH admin
+  access documented in [`GUIDE-ROOT-EN.md`](GUIDE-ROOT-EN.md) (section
+  "Update 2026-09-09: root reached indirectly") — so it is not relevant to
+  the WAN exposure this audit is about.
+- **`wan`** — the profile that would, in the abstract, matter for a WAN SSH
+  exposure, is **disabled**:
 
 ```
 dropbear.wan.enable = '0'
 ```
 
 So **no WAN SSH exposure is active** — but the capability is **dormant** in
-the configuration (an `enable='1'` would activate it). Worth knowing: an
-attacker gaining write access to the config could re-enable WAN SSH without
-adding anything new. Consistent with the dropbear evolution documented in
-[`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §3.2.
+the `wan` profile's configuration (an `enable='1'` would activate it). Worth
+knowing: an attacker gaining write access to the config could re-enable WAN
+SSH without adding anything new. Consistent with the dropbear evolution
+documented in [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §3.2.
 
-## 8. Broadpeak nanoCDN / MABR IPTV redirector — dual-instance bind conflict (Observed, 2026-09-09)
+## 7. Broadpeak nanoCDN / MABR IPTV redirector — dual-instance bind conflict (Observed, 2026-09-09)
 
 `system.mabr.enabled = '1'`. `/etc/init.d/nanocdn` (procd) starts **two**
 separate binaries from the **same** shared config file
@@ -194,7 +202,7 @@ still stable and listening on `18081`, no more respawn-loop, no functional
 regression observed (the core IPTV-redirector role — the actually useful
 one — does not depend on `nanocdn-rr` being present).
 
-## 9. ⚠️ `wifi-nurse-modal.lp` is not a safe read-only GET (Observed, 2026-09-09)
+## 8. ⚠️ `wifi-nurse-modal.lp` is not a safe read-only GET (Observed, 2026-09-09)
 
 A plain `GET /modals/wifi-nurse-modal.lp` was observed, on this same class of
 unit, to trigger **server-side write logic** rather than just returning a
@@ -217,7 +225,7 @@ operation, not a safe read. `cwmpconf-modal.lp` (CWMP/ACS config) carries the
 same category of risk and should be excluded from routine scans for the same
 reason.
 
-## 10. Open questions / to verify
+## 9. Open questions / to verify
 
 - Exact consumer of the local MQTT broker (§6.2): companion-app pairing
   assumed, not confirmed.
@@ -229,10 +237,10 @@ reason.
 - Single-unit snapshot with community firmware: firewall values and ACS
   profiles could differ on the factory TIM stock — not compared in this
   session.
-- `nanocdn-core`'s `BkStbA` STB-agent protocol (§8) was not reverse-engineered
+- `nanocdn-core`'s `BkStbA` STB-agent protocol (§7) was not reverse-engineered
   far enough to actually request and play a live channel — the exact
   `SetNewLiveChannel`/`GetBkeServerList` call format remains unknown.
 - The exact internal cause of `wifi-nurse-modal.lp`'s config-write side effect
-  (§9) — under what conditions it triggers, and whether it can be reproduced
+  (§8) — under what conditions it triggers, and whether it can be reproduced
   deliberately — was not isolated further; observed once, empirically, not
   forced.
