@@ -296,7 +296,7 @@ Method to resolve the actually-active IP (you need the SRV record, not
 just the hostname):
 1. `nslookup` from CMD → `set type=SRV`
 2. query `_sip._udp.<your-outbound-proxy>` (e.g.
-   `_sip._udp.d<NN>s<N>.co.imsw.telecomitalia.it`)
+   `_sip._udp.d11s7.co.imsw.telecomitalia.it`)
 3. the answer gives two or more hostnames with a "priority": take the one
    with the lowest priority
 4. `set type=A`, resolve that specific hostname → that's the IP to use
