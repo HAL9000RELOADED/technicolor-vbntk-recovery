@@ -1,0 +1,27 @@
+{
+  "esp32": {
+    "description": "ESP32: ingresso bootloader via toggle DTR/RTS, poi flash con esptool.py",
+    "flash_cmd": "esptool.py --port {port} --baud {baud} write_flash 0x1000 {file}",
+    "bootloader": {
+      "method": "dtr_rts",
+      "sequence": [["dtr", 0], ["rts", 1], ["sleep", 0.1], ["rts", 0]]
+    }
+  },
+  "stm32": {
+    "description": "STM32: ingresso bootloader via toggle DTR/RTS, poi flash con stm32flash",
+    "flash_cmd": "stm32flash -w {file} -v -g 0x0 {port}",
+    "bootloader": {
+      "method": "dtr_rts",
+      "sequence": [["rts", 1], ["dtr", 1], ["sleep", 0.1], ["dtr", 0], ["sleep", 0.1], ["rts", 0]]
+    }
+  },
+  "generic": {
+    "description": "Generico: ingresso bootloader tramite comando testuale, comando di flash da configurare",
+    "flash_cmd": null,
+    "bootloader": {
+      "method": "command",
+      "command": "reboot bootloader\n",
+      "wait": 2.0
+    }
+  }
+}
