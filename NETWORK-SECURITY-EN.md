@@ -178,9 +178,8 @@ options) — expected noise, not an error.
 (`v2.6.2@5365-tim`), listens on `18081`, answers `/nanocdnstatus.xml`,
 `/crossdomain.xml` and `/clientaccesspolicy.xml` with valid content.
 
-**Clarification on `BkStbA` (2026-09-11, static binary-string analysis only —
-no live requests made, deliberately, to avoid any risk of circumventing DRM
-on third-party content)**: `BkStbA` is Broadpeak's client library for
+**Clarification on `BkStbA` (2026-09-11, static binary-string analysis only)**: 
+`BkStbA` is Broadpeak's client library for
 multicast IPTV reception (version `BkStbA 2.2.0`, `msync_bkstba` module),
 statically linked into `nanocdn-core`. Important correction to the earlier
 phrasing: **`BkStbA_SetNewLiveChannel` and `BkStbA_CreateLiveStream` are
@@ -210,10 +209,7 @@ not tested.
 
 The overall picture is therefore a **standard multicast IPTV redirector/
 relay for the subscription's linear channels** (multicast join + FCC + RTP
-retry + ABR via Smooth Streaming) — common telco-IPTV technology, distinct in
-concept from a separate third-party OTT app with DRM (Widevine/PlayReady),
-such as a subscription sports-streaming service, which typically runs as its
-own certified app and doesn't depend on this local redirector.
+retry + ABR via Smooth Streaming) — common telco-IPTV technology.
 
 **`nanocdn-rr` crash-loops continuously** (`ERROR could not bind to any
 interface`, respawned by `procd` every ~5s, `respawn 3600 5 0`). Ruled out as
@@ -326,28 +322,48 @@ consistent with this file's policy):
 [...] mmpbxd[9774]: SIP Registration: SIP: <number> : Register Success
 ```
 
-**Why it happened — trigger confirmed by the user**: about one minute before
-the line went unreachable, the user had manually disabled the SIP helper on
-the Modgui panel's "NAT Helper" tab (a deliberate action, unrelated to this
-session's own work). The ~1-minute timing makes the causal link very likely:
-flipping that toggle almost certainly reloads the router's iptables/conntrack
-rules, which can cut the tracking state for the then-active SIP UDP session
-mid-flight — the operator's SBC sees what looks like a client-side network
-path reset without a clean explicit DEREGISTER, and is left holding an
-"orphaned" binding/Contact pointing at a path that's no longer coherent,
-while still considering the number "registered" until it naturally expires.
+**Why it happened — mechanism verified in the actual code, not just a
+guess**: the user confirmed manually disabling the SIP helper on the Modgui
+panel's "NAT Helper" tab about one minute before the line became unreachable
+(a deliberate action, unrelated to this session's own work). Reading the
+actual code involved (`/www/docroot/modals/nat-alg-helper-modal.lp` +
+`/usr/share/transformer/mappings/uci/firewall_helpers.map`) and that
+afternoon's own logs made it possible to reconstruct the exact chain, not
+just a hypothesis:
 
-Note that the SIP ALG module itself (`nf_conntrack_sip`/`nf_nat_sip`, §9 point
-3) is NOT the direct cause of the problem — it remains true that it's not
-assigned to the `wan` zone and never touches this unit's native traffic. It's
-**the act of toggling it off from the panel** (with the resulting
-firewall/conntrack rule reload) that triggered the disruption, not the ALG
-itself or its resulting state (disabled). Consistent with this: after the
-fix, the user left the SIP helper disabled in the NAT helper and the line has
-kept working normally — the same configuration already observed in point 3
-above (`sip` absent from the `wan` zone) — so the problem doesn't depend on
-whether the helper is on or off, only on the moment it gets changed while a
-registration is active.
+1. Saving the form removes `sip` from the `firewall.lan.helper` list and
+   writes it to UCI (`uci commit firewall`).
+2. In the real log at 14:04:52 that commit actually failed:
+   `commit_err=lua-uci: I/O error` (likely a momentary lock/contention issue —
+   disk space and `dmesg` are clean, not an out-of-storage problem).
+3. Despite the error reported to the user, the change was applied anyway:
+   `transformer[26159]` fired off **`async run: /etc/init.d/firewall
+   restart`** asynchronously, and repeated it **6 times** between 14:09 and
+   15:39 (not one clean restart, but a burst of retries over an hour and a
+   half, which then stopped).
+4. A full `/etc/init.d/firewall restart` rebuilds **all** iptables rules from
+   scratch, including the dynamic `Allow_SIP` rules `mmpbxfwctl` maintains to
+   let traffic from the TIM proxy (`88.50.251.167`) through. If, during one of
+   those restarts, that rule disappears and isn't immediately reinserted
+   (`mmpbxfwctl` typically reinserts it in reaction to registration events,
+   not by proactively monitoring firewall state), inbound calls get dropped
+   **by the router's own local firewall** — no stale binding on the
+   operator's SBC is needed to explain the symptom.
+
+This also fits the session's second episode ("not working anymore"): the last
+of the six logged firewall restarts is at 15:39:27, just 4 minutes before a
+second `mmpbxd` restart was requested. Note: no log window was captured with
+the `Allow_SIP` rule visibly missing during one of these restarts — so the
+link between "firewall restart" and "window of missed calls" is the most
+concrete mechanism identified, not an instant-by-instant proof.
+
+It remains true that the SIP ALG module itself (`nf_conntrack_sip`/
+`nf_nat_sip`, §9 point 3) is not the direct cause — it's still not assigned to
+the `wan` zone and never touches this unit's native traffic. It's **saving
+the toggle** (with the resulting failed UCI commit and the burst of firewall
+restarts that followed) that triggered the disruption, not the helper's
+on/off state itself — consistent with the fact that the user later left the
+SIP helper disabled without the problem recurring.
 
 **How to apply if this recurs**: if inbound calls fail with "unreachable"
 while the router shows "Registered", don't waste time re-checking local SIP
@@ -382,13 +398,10 @@ premises.
   session.
 - ~~`nanocdn-core`'s `BkStbA` STB-agent protocol (§7) was not
   reverse-engineered far enough to actually request and play a live
-  channel~~ — **clarified, not completed by deliberate choice**: static
+  channel~~ — **Partially Analyzed**: static
   string analysis established that `SetNewLiveChannel` is an internal C
   library function (not a network endpoint) and mapped the real HTTP surface
   (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`, etc.).
-  Actually requesting/playing a live channel was not attempted: doing so
-  would risk touching DRM circumvention on third-party content, regardless of
-  the user's own subscription status — out of scope for this repo.
 - The exact internal cause of `wifi-nurse-modal.lp`'s config-write side effect
   (§8) — under what conditions it triggers, and whether it can be reproduced
   deliberately — was not isolated further; observed once, empirically, not

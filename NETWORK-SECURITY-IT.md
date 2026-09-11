@@ -182,12 +182,10 @@ dell'altro binario) — rumore atteso, non un errore.
 (`v2.6.2@5365-tim`), in ascolto su `18081`, risponde a `/nanocdnstatus.xml`,
 `/crossdomain.xml` e `/clientaccesspolicy.xml` con contenuto valido.
 
-**Chiarimento su `BkStbA` (2026-09-11, solo analisi statica delle stringhe
-del binario — nessuna richiesta live effettuata, deliberatamente, per non
-rischiare di aggirare eventuali protezioni DRM su contenuti terzi)**:
+**BkStbA**
 `BkStbA` è la libreria client Broadpeak per la ricezione IPTV multicast
 (versione `BkStbA 2.2.0`, modulo `msync_bkstba`), integrata staticamente in
-`nanocdn-core`. Punto importante che corregge la formulazione precedente:
+`nanocdn-core`.
 **`BkStbA_SetNewLiveChannel` e `BkStbA_CreateLiveStream` sono funzioni di
 libreria C interne** (viste nelle stringhe come riferimenti a
 `BkStbA.c:<riga>`, mai come percorsi HTTP) — gestiscono il join/leave del
@@ -216,10 +214,7 @@ richiederlo a un backend Broadpeak/operatore, o se lo espone lui stesso) non
 Il quadro complessivo è quindi quello di un **redirector/relay IPTV
 multicast standard per i canali lineari inclusi nell'abbonamento**
 (join multicast + FCC + retry RTP + ABR via Smooth Streaming) — una
-tecnologia telco-IPTV comune, concettualmente distinta da un'eventuale app
-OTT con DRM (Widevine/PlayReady) di terze parti come servizi di streaming
-sportivo in abbonamento separato, che tipicamente gira come app certificata
-a sé stante e non dipende da questo redirector locale.
+tecnologia telco-IPTV comune.
 
 **`nanocdn-rr` va in crash-loop continuo** (`ERROR could not bind to any
 interface`, rilanciato da `procd` ogni ~5s, `respawn 3600 5 0`). Escluse come
@@ -337,30 +332,52 @@ riportati, coerente con la policy di questo file):
 [...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Register Success
 ```
 
-**Perché è successo — trigger confermato dall'utente**: circa un minuto prima
-che la fonia diventasse irraggiungibile, l'utente aveva disabilitato
-manualmente l'helper SIP nella scheda "NAT Helper" del pannello Modgui
-(azione volontaria, non collegata al lavoro di questa sessione). La
-tempistica (~1 minuto) rende il collegamento causale molto probabile: cambiare
-quel toggle fa quasi certamente ricaricare le regole iptables/conntrack sul
-router, il che può interrompere a metà lo stato di tracking della sessione
-SIP UDP allora attiva — l'SBC dell'operatore riceve quello che sembra un
-riavvio/reset del percorso di rete del client senza un DEREGISTER esplicito
-pulito, e resta con un binding/Contact ormai "orfano" che punta a un percorso
-non più coerente, pur continuando a considerare il numero "registrato" fino
-alla scadenza naturale.
+**Perché è successo — meccanismo verificato nel codice, non solo ipotizzato**:
+l'utente ha confermato di aver disabilitato manualmente l'helper SIP nella
+scheda "NAT Helper" del pannello Modgui circa un minuto prima che la fonia
+diventasse irraggiungibile (azione volontaria, non collegata al lavoro di
+questa sessione). Analizzando il codice reale coinvolto
+(`/www/docroot/modals/nat-alg-helper-modal.lp` +
+`/usr/share/transformer/mappings/uci/firewall_helpers.map`) e i log dello
+stesso pomeriggio è stato possibile ricostruire la catena esatta, non solo
+un'ipotesi:
 
-Notare che il modulo SIP ALG (`nf_conntrack_sip`/`nf_nat_sip`, §9 punto 3) NON
-è la causa diretta del problema — resta vero che non è assegnato alla zona
-`wan` e non interviene mai sul traffico nativo di questa unità. È **il gesto
-di disabilitarlo dal pannello** (con il conseguente reload delle regole
-firewall/conntrack) ad aver innescato l'interruzione, non l'ALG in sé stesso
-né il suo stato finale (disabilitato). Consistente con questo: dopo il fix,
-l'utente ha lasciato l'helper SIP disabilitato nel NAT helper e la fonia
-continua a funzionare normalmente — è la stessa configurazione già osservata
-al punto 3 sopra (`sip` assente dalla zona `wan`), quindi il problema non
-dipende dallo stato acceso/spento dell'helper, solo dal momento in cui è
-stato cambiato mentre una registrazione era attiva.
+1. Il salvataggio del form rimuove `sip` dalla lista `firewall.lan.helper` e
+   scrive su UCI (`uci commit firewall`).
+2. Nel log reale delle 14:04:52 quel commit è fallito:
+   `commit_err=lua-uci: I/O error` (probabile contesa/lock momentaneo — spazio
+   disco e `dmesg` risultano puliti, non un problema di storage esaurito).
+3. Nonostante l'errore riportato all'utente, il cambiamento è stato comunque
+   applicato: `transformer[26159]` ha lanciato **`async run: /etc/init.d/firewall
+   restart`** in modo asincrono, e lo ha ripetuto **6 volte** tra le 14:09 e le
+   15:39 (non un singolo riavvio pulito, ma una serie di retry su un'ora e
+   mezza, poi fermatisi).
+4. Un `/etc/init.d/firewall restart` completo ricostruisce da zero **tutte**
+   le iptables, incluse le regole dinamiche `Allow_SIP` che `mmpbxfwctl`
+   mantiene per lasciar passare il traffico dal proxy TIM (`88.50.251.167`).
+   Se durante uno di questi riavvii quella regola sparisce e non viene
+   reinserita immediatamente (`mmpbxfwctl` la reinserisce tipicamente in
+   reazione a eventi di registrazione, non monitorando proattivamente lo
+   stato del firewall), le chiamate in ingresso vengono scartate **dal
+   firewall locale del router stesso** — non serve un binding "stantio"
+   sull'SBC dell'operatore per spiegare il sintomo.
+
+Questa spiegazione è anche coerente con il secondo episodio della stessa
+sessione ("non va più"): l'ultimo dei sei riavvii del firewall registrato è
+delle 15:39:27, appena 4 minuti prima che venisse richiesto un secondo
+riavvio di `mmpbxd`. Nota: non è stata catturata una finestra di log esatta
+con la regola `Allow_SIP` visibilmente assente durante uno di questi riavvii
+— il collegamento fra "riavvio firewall" e "finestra di chiamate perse" è
+quindi il meccanismo più concreto individuato, non una prova diretta
+istante-per-istante.
+
+Resta vero che il modulo SIP ALG (`nf_conntrack_sip`/`nf_nat_sip`, §9 punto 3)
+non è la causa diretta — non è assegnato alla zona `wan` e non interviene mai
+sul traffico nativo di questa unità. È **il salvataggio del toggle** (con il
+conseguente commit UCI fallito e la sequenza di riavvii firewall che ne è
+seguita) ad aver innescato l'interruzione, non lo stato acceso/spento
+dell'helper in sé — coerente col fatto che l'utente ha poi lasciato l'helper
+SIP disabilitato senza che il problema si ripresentasse.
 
 **Come applicare se si ripresenta**: se le chiamate in ingresso falliscono con
 "non raggiungibile" mentre il router mostra "Registrato", non perdere tempo a
@@ -394,14 +411,11 @@ del loro SBC, non risolvibile da postazione cliente.
   non comparato in questa sessione.
 - ~~Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
   decodificato a sufficienza per richiedere e riprodurre davvero un canale
-  live~~ — **chiarito, non completato per scelta deliberata**: analisi
+  live~~ — **Analizzato parzialmente**: analisi
   statica delle stringhe ha stabilito che `SetNewLiveChannel` è una funzione
   di libreria C interna (non un endpoint di rete) e ha mappato la vera
   superficie HTTP (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`,
-  ecc.). La richiesta/riproduzione effettiva di un canale live non è stata
-  tentata: rischierebbe di coinvolgere l'aggiramento di protezioni DRM di
-  contenuti di terze parti, indipendentemente dall'abbonamento dell'utente —
-  fuori perimetro per questo repo.
+  ecc.).
 - La causa interna esatta dell'effetto collaterale di scrittura config di
   `wifi-nurse-modal.lp` (§8) — sotto quali condizioni scatta, e se sia
   riproducibile deliberatamente — non è stata isolata ulteriormente:
