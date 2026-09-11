@@ -232,8 +232,79 @@ come un'operazione di **scrittura**, non una lettura sicura.
 `cwmpconf-modal.lp` (config CWMP/ACS) porta lo stesso tipo di rischio e
 andrebbe escluso dalle scansioni di routine per lo stesso motivo.
 
-## 9. Aperture / da verificare
+## 9. VoIP/SIP: "cliente non raggiungibile" nonostante stato "Registrato" — binding stantio lato SBC dell'operatore (Osservato/Risolto, 2026-09-11)
 
+Sintomo: chiamando il numero fisso (fonia via `mmpbxd`, profilo SIP verso
+registrar `telecomitalia.it` / proxy `88.50.251.167:5060`) da un cellulare di
+rete terza, l'operatore mobile chiamante rispondeva "il cliente da lei
+chiamato non è momentaneamente raggiungibile" — nonostante il pannello Modgui
+e lo stato SIP locale mostrassero "Registrato".
+
+Percorso diagnostico (tutto in sola lettura via SSH root, nessuna modifica
+fino al fix finale):
+
+1. **Config e stato del servizio** (`uci show mmpbx*`): profilo SIP corretto
+   (registrar/proxy/realm popolati, nessun placeholder residuo), processo
+   `mmpbxd` in esecuzione, cicli di re-registrazione regolari ogni ~55-58
+   minuti visibili in `logread` — nulla di anomalo a prima vista.
+2. Trovato un incidente di deregistrazione isolato, la mattina stessa, causato
+   da un fallimento di invio UDP (`errno=22`) verso il proxy SIP — durato
+   circa 3 minuti, ma **non coincidente** con gli orari reali dei tentativi di
+   chiamata falliti segnalati dall'utente: un falso indizio, non la causa.
+3. **NAT helper (SIP ALG)**: verificato che i moduli kernel `nf_conntrack_sip`/
+   `nf_nat_sip` sono caricati, ma **escluso come causa**:
+   `net.netfilter.nf_conntrack_helper=0` disabilita l'auto-attach globale
+   degli helper, e l'helper `sip` è assegnato solo alle zone firewall
+   `lan`/`loopback`, non `wan` — dove gira il traffico SIP nativo del router,
+   con IP pubblico diretto via PPPoE e nessun NAT applicato al proprio
+   traffico. Il SIP ALG quindi non tocca la fonia nativa di questa unità.
+4. **Test risolutivo**: cattura in diretta di `logread -f` per 60 secondi
+   mentre venivano effettuati due tentativi di chiamata reali da un numero
+   esterno. Risultato: **zero attività SIP/mmpbx nel log per l'intera
+   finestra** — nessun INVITE è mai arrivato al router. Prova diretta che il
+   problema non era sul CPE ma **a monte, nella rete/SBC dell'operatore**, che
+   aveva un binding di registrazione stantio per quel numero nonostante il
+   router si vedesse regolarmente registrato dal proprio lato.
+
+**Fix**: `/etc/init.d/mmpbxd restart` (dopo aver verificato via
+`ubus call mmpbxbrcmfxs.state get '{"device":"fxs_dev_N"}'` che nessuna
+chiamata fosse in corso su nessuna delle due linee FXS). Questo ha prodotto un
+ciclo pulito Deregister → Register Success in meno di 2 secondi, costringendo
+l'SBC dell'operatore a scartare il binding obsoleto e crearne uno nuovo.
+Chiamata di verifica riuscita subito dopo.
+
+Estratto reale del log del fix (numero telefonico e IP pubblico WAN non
+riportati, coerente con la policy di questo file):
+
+```
+[...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Deregister
+[...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Register Success
+```
+
+**Perché è successo**: non determinabile con certezza lato cliente — è uno
+stato interno dell'SBC dell'operatore, non ispezionabile da qui. L'ipotesi più
+probabile è un binding/Contact non aggiornato sul loro softswitch (causa
+tipica: un evento di rete precedente — es. un cambio dell'IP WAN o una
+finestra di inattività prolungata tra due REGISTER, dato l'intervallo di
+~55-58 minuti osservato — lascia l'SBC con un binding che punta a un percorso
+non più valido, pur restando "registrato" dal punto di vista del client).
+
+**Come applicare se si ripresenta**: se le chiamate in ingresso falliscono con
+"non raggiungibile" mentre il router mostra "Registrato", non perdere tempo a
+ricontrollare config SIP locale/NAT/ALG (già escluse come classe di causa) —
+passare direttamente a: (1) catturare i log in diretta durante un tentativo di
+chiamata reale per confermare che l'INVITE non arriva mai (firma del problema
+a monte), (2) `/etc/init.d/mmpbxd restart` come fix rapido self-service, dopo
+aver verificato che le linee siano libere, (3) se il restart non risolve,
+escalare al supporto TIM (187/191) con il sintomo esatto, perché è uno stato
+del loro SBC, non risolvibile da postazione cliente.
+
+## 10. Aperture / da verificare
+
+- Causa interna esatta del binding stantio lato SBC (§9): non determinabile
+  dal lato cliente — non è noto se legata a un evento di rete precedente
+  (rinnovo IP WAN, resync DSL) o ad altro; osservata una volta, risolta col
+  restart del servizio, non isolata ulteriormente.
 - Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
   companion, non confermato.
 - Non verificato se il throttling CWMP (§2, ~200/60 s) sia applicato

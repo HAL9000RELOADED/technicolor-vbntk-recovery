@@ -225,8 +225,79 @@ operation, not a safe read. `cwmpconf-modal.lp` (CWMP/ACS config) carries the
 same category of risk and should be excluded from routine scans for the same
 reason.
 
-## 9. Open questions / to verify
+## 9. VoIP/SIP: "callee unreachable" despite local "Registered" state — stale binding on the operator's SBC (Observed/Resolved, 2026-09-11)
 
+Symptom: calling the landline (voice via `mmpbxd`, SIP profile against
+registrar `telecomitalia.it` / proxy `88.50.251.167:5060`) from a mobile phone
+on a third-party carrier, the calling carrier returned "the callee is
+temporarily unreachable" — even though the Modgui panel and the local SIP
+state both showed "Registered".
+
+Diagnostic path (all read-only over root SSH, no changes until the final
+fix):
+
+1. **Service config and status** (`uci show mmpbx*`): SIP profile correctly
+   populated (registrar/proxy/realm set, no leftover placeholder), `mmpbxd`
+   process running, regular re-registration cycles roughly every 55-58
+   minutes visible in `logread` — nothing obviously wrong at first glance.
+2. Found one isolated deregistration incident earlier the same morning,
+   caused by a UDP send failure (`errno=22`) to the SIP proxy — lasted about
+   3 minutes, but **did not line up** with the actual timestamps of the
+   reported failed call attempts: a red herring, not the cause.
+3. **NAT helper (SIP ALG)**: confirmed the `nf_conntrack_sip`/`nf_nat_sip`
+   kernel modules are loaded, but **ruled out** as the cause:
+   `net.netfilter.nf_conntrack_helper=0` disables global helper auto-attach,
+   and the `sip` helper is only assigned to the `lan`/`loopback` firewall
+   zones, not `wan` — where this router's own native SIP traffic runs, with a
+   direct public IP over PPPoE and no NAT applied to its own traffic. The SIP
+   ALG therefore never touches this unit's native voice service.
+4. **Decisive test**: live-captured `logread -f` for 60 seconds while two
+   real call attempts were placed from an external number. Result: **zero
+   SIP/mmpbx log activity for the entire window** — no INVITE ever reached
+   the router. Direct proof the problem wasn't on the CPE but **upstream, on
+   the operator's network/SBC**, which held a stale registration binding for
+   that number despite the router looking regularly registered on its own
+   side.
+
+**Fix**: `/etc/init.d/mmpbxd restart` (after confirming via
+`ubus call mmpbxbrcmfxs.state get '{"device":"fxs_dev_N"}'` that neither FXS
+line had a call in progress). This produced a clean Deregister → Register
+Success cycle in under 2 seconds, forcing the operator's SBC to drop the
+stale binding and create a fresh one. A verification call succeeded right
+after.
+
+Real log excerpt from the fix (phone number and public WAN IP not reported,
+consistent with this file's policy):
+
+```
+[...] mmpbxd[9774]: SIP Registration: SIP: <number> : Deregister
+[...] mmpbxd[9774]: SIP Registration: SIP: <number> : Register Success
+```
+
+**Why it happened**: not determinable with certainty from the client side —
+it's internal state on the operator's SBC, not inspectable from here. The
+most likely hypothesis is a stale Contact/binding on their softswitch
+(typical cause: an earlier network event — e.g. a WAN IP change, or a long
+idle window between two REGISTERs given the observed ~55-58 minute interval —
+leaves the SBC holding a binding that points to a path that's no longer
+valid, while the client itself still considers itself "registered").
+
+**How to apply if this recurs**: if inbound calls fail with "unreachable"
+while the router shows "Registered", don't waste time re-checking local SIP
+config/NAT/ALG (already ruled out as a class of cause) — go straight to: (1)
+live-capture logs during a real call attempt to confirm the INVITE never
+arrives (the upstream-problem signature), (2) `/etc/init.d/mmpbxd restart` as
+the fast self-service fix, after confirming both lines are idle, (3) if the
+restart doesn't fix it, escalate to the carrier's support line with the exact
+symptom, since it's state on their SBC, not something fixable from customer
+premises.
+
+## 10. Open questions / to verify
+
+- Exact internal cause of the stale SBC-side binding (§9): not determinable
+  from the client side — unclear whether tied to an earlier network event
+  (WAN IP renewal, DSL resync) or something else; observed once, resolved by
+  restarting the service, not isolated further.
 - Exact consumer of the local MQTT broker (§6.2): companion-app pairing
   assumed, not confirmed.
 - Not verified whether the CWMP throttling (§2, ~200/60 s) is applied per-IP
