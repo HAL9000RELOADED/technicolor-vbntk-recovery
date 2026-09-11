@@ -273,10 +273,13 @@ New-NetFirewallRule -DisplayName "TFTP recovery" -Direction Inbound -Protocol UD
 the serial log and hash match), SSH login with `root`/`root` on the new
 image **still fails** ("Permission denied (password)"), even though the
 `/etc/shadow` hash was verified correct locally before flashing. At the same
-time, the web UI shows a distinct but possibly related symptom — see
-**[`WEBUI-LUA-ISSUE-EN.md`](WEBUI-LUA-ISSUE-EN.md)** for the full analysis
-(the Lua engine is alive, but page templates get rendered as raw unexecuted
-text instead of being run). Leading hypothesis on the SSH side, not yet
+time, the web UI shows a distinct but possibly related symptom: the Lua
+engine is alive, but page templates get rendered as raw unexecuted text
+instead of being run (observed repeatedly across the project; the term
+"raw-Lua issue" also appears in [`GUIDE-ROOT-EN.md`](GUIDE-ROOT-EN.md), there
+only to note it did *not* occur in that specific attempt) — **no dedicated
+write-up exists yet for this symptom**, it remains an open problem without
+its own document. Leading hypothesis on the SSH side, not yet
 confirmed: these systems mount the squashfs read-only with a **persistent
 writable overlay** (a separate partition, untouched by the BOOTP/TFTP flash,
 which only covers kernel+rootfs — see

@@ -271,10 +271,15 @@ dal log seriale e dall'hash), il login SSH `root`/`root` sulla nuova
 immagine **continua a fallire** ("Permission denied (password)"), nonostante
 l'hash in `/etc/shadow` sia verificato correttamente in locale prima del
 flash. Contestualmente, la webUI mostra un sintomo distinto ma forse
-correlato — vedi **[`WEBUI-LUA-ISSUE-IT.md`](WEBUI-LUA-ISSUE-IT.md)** per
-l'analisi completa (motore Lua attivo ma template renderizzati come testo
-grezzo invece che eseguiti). Ipotesi principale sulla parte SSH, non ancora
-verificata: questi sistemi montano lo squashfs in sola lettura con un
+correlato: il motore Lua è attivo ma i template vengono renderizzati come
+testo grezzo invece che eseguiti (osservato più volte nel corso del progetto;
+il termine "problema di Lua grezzo" compare anche in
+[`GUIDA-ROOT-IT.md`](GUIDA-ROOT-IT.md), lì però solo per notare che *non* si
+è verificato in quel tentativo specifico) — **non esiste ancora un'analisi
+dedicata scritta per questo sintomo**, resta un problema aperto senza
+documento a parte. Ipotesi
+principale sulla parte SSH, non ancora verificata: questi sistemi montano lo
+squashfs in sola lettura con un
 **overlay scrivibile persistente** (altra partizione, non toccata dal flash
 BOOTP/TFTP, che copre solo kernel+rootfs — vedi
 [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md)) per `/etc` — se una

@@ -14,6 +14,7 @@
 - [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) — `.rbi` container format analysis (header, AES encryption, "signature" block) + comparison across all 14 available versions
 - [`VERSION-CHANGELOG-IT.md`](VERSION-CHANGELOG-IT.md) — changelog sequenziale versione-per-versione (1.0.3 → 2.4.5_PATCHED), incluso il contenuto esatto della patch di rooting
 - [`VERSION-CHANGELOG-EN.md`](VERSION-CHANGELOG-EN.md) — sequential version-by-version changelog (1.0.3 → 2.4.5_PATCHED), including the exact content of the rooting patch
+- [`VERSION-CHANGELOG-DIFFS-IT.md`](VERSION-CHANGELOG-DIFFS-IT.md) — dettaglio a livello di diff dei cambiamenti versione-per-versione (solo italiano, supplemento del changelog sopra)
 - [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) — layout NAND, partizioni MTD, sistema dual-bank, datasheet SoC/NAND
 - [`MEMORY-ARCHITECTURE-EN.md`](MEMORY-ARCHITECTURE-EN.md) — NAND layout, MTD partitions, dual-bank system, SoC/NAND datasheet
 - [`FIRMWARE-INTERNALS-IT.md`](FIRMWARE-INTERNALS-IT.md) — interni dell'immagine flash: layout kernel/squashfs per versione, header del blob kernel decodificato, generazione di `etc/config/network`, nuovi servizi 2.4.5
@@ -29,6 +30,7 @@
 
 ## Contents / Contenuto
 
+- [`uart-tool/README.md`](uart-tool/README.md) — standalone CLI/GUI for UART monitor/shell/commands and BOOTP+TFTP netboot flashing, with precompiled executables
 - `scripts/bootp_responder.py` — minimal scapy-based BOOTP responder that correctly fills the `siaddr` (next-server) field Tftpd64 leaves blank
 - `scripts/tftpd32.ini.example` — working Tftpd64 configuration used for the TFTP-only recovery server
 - `root/afg_inject_*.py` — three AutoFlashGUI-based command-injection rooting attempts (all failed on AGTEF_2.4.5 -- see the root guide)

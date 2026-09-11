@@ -119,8 +119,31 @@ tenere d'occhio su unità dove risultasse attivo.
 Broker MQTT **locale** con TLS mutual-cert su `:8883` (il certificato client
 corrispondente è l'infoblock `/proc/rip/011a.cert`, vedi
 [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.3).
-Verosimilmente usato per il pairing con l'app companion. **Ipotesi**, non
-verificato il consumatore esatto del broker.
+
+**Consumatore identificato (2026-09-11)**: è **`wifi_doctor_agent`**, lo
+stesso componente di §6.1. La libreria `/usr/lib/libwifidoctoragent.so`
+contiene un client MQTT completo (linka `libmosquitto`, stringhe come
+`[fhc] Established connection to MQTT broker`, `Using secure MQTT
+connection`, `chain.pem`) che referenzia esattamente lo stesso percorso
+`/tmp/certs/` usato dal listener TLS di mosquitto. Il plugin di
+autenticazione lato server (`/usr/lib/mosquitto/wd_auth_plugin.so`) contiene
+la stringa `wd_auth` — stesso prefisso "WD" (WiFi Doctor). La UCI di
+`wifi_doctor_agent` conferma la relazione: la sezione `app_support` si
+autodichiara `is_broker='1'`.
+
+**Ma sull'unità osservata l'intera catena risulta dormiente**, nonostante
+alcuni flag UCI individualmente accesi (`app_support.enable='1'`,
+`fhc.enable='1'`, `fhc_master.enable='1'`, mentre il toggle cloud principale
+`wifi_doctor_agent.config.enabled` resta `'0'` come già in §6.1): `/tmp/certs/`
+non esiste, **nessun processo su tutto il sistema ha `libwifidoctoragent.so`
+mappato in memoria** (verificato scansionando `/proc/*/maps` per ogni PID),
+nessuno script `/etc/init.d/` la referenzia, e mosquitto stesso non ha né un
+PID reale né una porta in ascolto (`8883`/`1883` assenti da `ss -tln`) —
+nonostante `/etc/init.d/mosquitto status` risponda "running" (falso
+positivo: il controllo di stato non verifica la liveness reale del
+processo). In sintesi: il broker esiste come infrastruttura pronta all'uso,
+ma su questa unità non c'è attualmente nulla che lo avvii né nulla che vi si
+connetta.
 
 ### 6.3 Dropbear — profili `wan` (WAN, dormiente) e `afg` (LAN, attivo)
 
@@ -157,13 +180,41 @@ dell'altro binario) — rumore atteso, non un errore.
 
 **`nanocdn-core` funziona correttamente**: stabile, build brandizzata TIM
 (`v2.6.2@5365-tim`), in ascolto su `18081`, risponde a `/nanocdnstatus.xml`,
-`/crossdomain.xml` e `/clientaccesspolicy.xml` con contenuto valido. La sua
-API proprietaria STB-agent (`BkStbA`, nelle stringhe compaiono
-`SetNewLiveChannel` e `/GetBkeServerList`) è raggiungibile, ma la sequenza di
-chiamate per richiedere un canale live non è stata decodificata in questa
-sessione (non documentata; nel binario sono presenti pattern in stile
-Flash/Silverlight "QualityLevels()/Fragments()" e manifest HLS/DASH, coerenti
-con supporto a Microsoft Smooth Streaming + HLS/DASH in output).
+`/crossdomain.xml` e `/clientaccesspolicy.xml` con contenuto valido.
+
+**BkStbA**
+`BkStbA` è la libreria client Broadpeak per la ricezione IPTV multicast
+(versione `BkStbA 2.2.0`, modulo `msync_bkstba`), integrata staticamente in
+`nanocdn-core`.
+**`BkStbA_SetNewLiveChannel` e `BkStbA_CreateLiveStream` sono funzioni di
+libreria C interne** (viste nelle stringhe come riferimenti a
+`BkStbA.c:<riga>`, mai come percorsi HTTP) — gestiscono il join/leave del
+gruppo multicast, il **Fast Channel Change (FCC)**, il **retry RTP in
+unicast** per i pacchetti multicast persi, e il **FEC** (correzione errori
+in avanti). Non risultano raggiungibili da rete come endpoint HTTP in questo
+binario — sono l'API con cui il *resto* del codice di `nanocdn-core`
+comanda la libreria, non qualcosa che uno STB esterno invoca direttamente.
+
+Dalle stringhe emergono anche altri percorsi in stile URL, la cui direzione
+(esposti da `nanocdn-core` in ingresso su `18081`, oppure template usati da
+`nanocdn-core` stesso per richieste in uscita) **non è confermata solo dalle
+stringhe** — coerente col fatto che il file serve già `crossdomain.xml`/
+`clientaccesspolicy.xml` in ingresso, il che rende plausibile ma non certa
+un'esposizione lato server: `/QualityLevels(`, `/Fragments(`, `/Segment`,
+`/Level`, `/Alter` — sintassi di richiesta **Microsoft Smooth Streaming** per
+manifest/segmenti ABR (conferma precisa dell'ipotesi precedente "pattern in
+stile Flash/Silverlight", ora identificata come sintassi MSS standard) — e
+`/nservices/metricsReceiver` (nome coerente con un endpoint di raccolta
+metriche, verosimilmente ricevuto piuttosto che richiesto, ma non verificato).
+Stesso livello di incertezza per `/GetBkeServerList`, che compare come
+stringa isolata; la direzione (se è `nanocdn-core` a
+richiederlo a un backend Broadpeak/operatore, o se lo espone lui stesso) non
+è determinabile dalle sole stringhe e non è stata testata.
+
+Il quadro complessivo è quindi quello di un **redirector/relay IPTV
+multicast standard per i canali lineari inclusi nell'abbonamento**
+(join multicast + FCC + retry RTP + ABR via Smooth Streaming) — una
+tecnologia telco-IPTV comune.
 
 **`nanocdn-rr` va in crash-loop continuo** (`ERROR could not bind to any
 interface`, rilanciato da `procd` ogni ~5s, `respawn 3600 5 0`). Escluse come
@@ -232,10 +283,124 @@ come un'operazione di **scrittura**, non una lettura sicura.
 `cwmpconf-modal.lp` (config CWMP/ACS) porta lo stesso tipo di rischio e
 andrebbe escluso dalle scansioni di routine per lo stesso motivo.
 
-## 9. Aperture / da verificare
+## 9. VoIP/SIP: "cliente non raggiungibile" nonostante stato "Registrato" — binding stantio lato SBC dell'operatore (Osservato/Risolto, 2026-09-11)
 
-- Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
-  companion, non confermato.
+Sintomo: chiamando il numero fisso (fonia via `mmpbxd`, profilo SIP verso
+registrar `telecomitalia.it` / proxy `88.50.251.167:5060`) da un cellulare di
+rete terza, l'operatore mobile chiamante rispondeva "il cliente da lei
+chiamato non è momentaneamente raggiungibile" — nonostante il pannello Modgui
+e lo stato SIP locale mostrassero "Registrato".
+
+Percorso diagnostico (tutto in sola lettura via SSH root, nessuna modifica
+fino al fix finale):
+
+1. **Config e stato del servizio** (`uci show mmpbx*`): profilo SIP corretto
+   (registrar/proxy/realm popolati, nessun placeholder residuo), processo
+   `mmpbxd` in esecuzione, cicli di re-registrazione regolari ogni ~55-58
+   minuti visibili in `logread` — nulla di anomalo a prima vista.
+2. Trovato un incidente di deregistrazione isolato, la mattina stessa, causato
+   da un fallimento di invio UDP (`errno=22`) verso il proxy SIP — durato
+   circa 3 minuti, ma **non coincidente** con gli orari reali dei tentativi di
+   chiamata falliti segnalati dall'utente: un falso indizio, non la causa.
+3. **NAT helper (SIP ALG)**: verificato che i moduli kernel `nf_conntrack_sip`/
+   `nf_nat_sip` sono caricati, ma **escluso come causa**:
+   `net.netfilter.nf_conntrack_helper=0` disabilita l'auto-attach globale
+   degli helper, e l'helper `sip` è assegnato solo alle zone firewall
+   `lan`/`loopback`, non `wan` — dove gira il traffico SIP nativo del router,
+   con IP pubblico diretto via PPPoE e nessun NAT applicato al proprio
+   traffico. Il SIP ALG quindi non tocca la fonia nativa di questa unità.
+4. **Test risolutivo**: cattura in diretta di `logread -f` per 60 secondi
+   mentre venivano effettuati due tentativi di chiamata reali da un numero
+   esterno. Risultato: **zero attività SIP/mmpbx nel log per l'intera
+   finestra** — nessun INVITE è mai arrivato al router. Prova diretta che il
+   problema non era sul CPE ma **a monte, nella rete/SBC dell'operatore**, che
+   aveva un binding di registrazione stantio per quel numero nonostante il
+   router si vedesse regolarmente registrato dal proprio lato.
+
+**Fix**: `/etc/init.d/mmpbxd restart` (dopo aver verificato via
+`ubus call mmpbxbrcmfxs.state get '{"device":"fxs_dev_N"}'` che nessuna
+chiamata fosse in corso su nessuna delle due linee FXS). Questo ha prodotto un
+ciclo pulito Deregister → Register Success in meno di 2 secondi, costringendo
+l'SBC dell'operatore a scartare il binding obsoleto e crearne uno nuovo.
+Chiamata di verifica riuscita subito dopo.
+
+Estratto reale del log del fix (numero telefonico e IP pubblico WAN non
+riportati, coerente con la policy di questo file):
+
+```
+[...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Deregister
+[...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Register Success
+```
+
+**Perché è successo — meccanismo verificato nel codice, non solo ipotizzato**:
+l'utente ha confermato di aver disabilitato manualmente l'helper SIP nella
+scheda "NAT Helper" del pannello Modgui circa un minuto prima che la fonia
+diventasse irraggiungibile (azione volontaria, non collegata al lavoro di
+questa sessione). Analizzando il codice reale coinvolto
+(`/www/docroot/modals/nat-alg-helper-modal.lp` +
+`/usr/share/transformer/mappings/uci/firewall_helpers.map`) e i log dello
+stesso pomeriggio è stato possibile ricostruire la catena esatta, non solo
+un'ipotesi:
+
+1. Il salvataggio del form rimuove `sip` dalla lista `firewall.lan.helper` e
+   scrive su UCI (`uci commit firewall`).
+2. Nel log reale delle 14:04:52 quel commit è fallito:
+   `commit_err=lua-uci: I/O error` (probabile contesa/lock momentaneo — spazio
+   disco e `dmesg` risultano puliti, non un problema di storage esaurito).
+3. Nonostante l'errore riportato all'utente, il cambiamento è stato comunque
+   applicato: `transformer[26159]` ha lanciato **`async run: /etc/init.d/firewall
+   restart`** in modo asincrono, e lo ha ripetuto **6 volte** tra le 14:09 e le
+   15:39 (non un singolo riavvio pulito, ma una serie di retry su un'ora e
+   mezza, poi fermatisi).
+4. Un `/etc/init.d/firewall restart` completo ricostruisce da zero **tutte**
+   le iptables, incluse le regole dinamiche `Allow_SIP` che `mmpbxfwctl`
+   mantiene per lasciar passare il traffico dal proxy TIM (`88.50.251.167`).
+   Se durante uno di questi riavvii quella regola sparisce e non viene
+   reinserita immediatamente (`mmpbxfwctl` la reinserisce tipicamente in
+   reazione a eventi di registrazione, non monitorando proattivamente lo
+   stato del firewall), le chiamate in ingresso vengono scartate **dal
+   firewall locale del router stesso** — non serve un binding "stantio"
+   sull'SBC dell'operatore per spiegare il sintomo.
+
+Questa spiegazione è anche coerente con il secondo episodio della stessa
+sessione ("non va più"): l'ultimo dei sei riavvii del firewall registrato è
+delle 15:39:27, appena 4 minuti prima che venisse richiesto un secondo
+riavvio di `mmpbxd`. Nota: non è stata catturata una finestra di log esatta
+con la regola `Allow_SIP` visibilmente assente durante uno di questi riavvii
+— il collegamento fra "riavvio firewall" e "finestra di chiamate perse" è
+quindi il meccanismo più concreto individuato, non una prova diretta
+istante-per-istante.
+
+Resta vero che il modulo SIP ALG (`nf_conntrack_sip`/`nf_nat_sip`, §9 punto 3)
+non è la causa diretta — non è assegnato alla zona `wan` e non interviene mai
+sul traffico nativo di questa unità. È **il salvataggio del toggle** (con il
+conseguente commit UCI fallito e la sequenza di riavvii firewall che ne è
+seguita) ad aver innescato l'interruzione, non lo stato acceso/spento
+dell'helper in sé — coerente col fatto che l'utente ha poi lasciato l'helper
+SIP disabilitato senza che il problema si ripresentasse.
+
+**Come applicare se si ripresenta**: se le chiamate in ingresso falliscono con
+"non raggiungibile" mentre il router mostra "Registrato", non perdere tempo a
+ricontrollare config SIP locale/NAT/ALG (già escluse come classe di causa) —
+passare direttamente a: (1) catturare i log in diretta durante un tentativo di
+chiamata reale per confermare che l'INVITE non arriva mai (firma del problema
+a monte), (2) `/etc/init.d/mmpbxd restart` come fix rapido self-service, dopo
+aver verificato che le linee siano libere, (3) se il restart non risolve,
+escalare al supporto TIM (187/191) con il sintomo esatto, perché è uno stato
+del loro SBC, non risolvibile da postazione cliente.
+
+## 10. Aperture / da verificare
+
+- ~~Causa interna esatta del binding stantio lato SBC (§9): non determinabile
+  dal lato cliente~~ — **risolto**: trigger confermato dall'utente (toggle
+  manuale dell'helper SIP nel pannello NAT Helper, ~1 minuto prima del
+  sintomo). Resta ipotetico solo il meccanismo interno esatto lato SBC
+  (perché un reload conntrack locale produce un binding orfano lato
+  operatore) — non verificabile senza visibilità sull'SBC stesso.
+- ~~Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
+  companion, non confermato~~ — **risolto**: è `wifi_doctor_agent`, ma
+  sull'unità osservata l'intera catena (agente, certificati, broker) è
+  dormiente, non un consumatore attivo.
 - Non verificato se il throttling CWMP (§2, ~200/60 s) sia applicato
   per-IP o globale — cambia la valutazione della resistenza al brute-force
   distribuito.
@@ -244,10 +409,13 @@ andrebbe escluso dalle scansioni di routine per lo stesso motivo.
 - Snapshot di una sola unità con firmware community: i valori del firewall e
   dei profili ACS potrebbero differire sullo stock TIM di fabbrica —
   non comparato in questa sessione.
-- Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
+- ~~Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
   decodificato a sufficienza per richiedere e riprodurre davvero un canale
-  live — il formato esatto delle chiamate `SetNewLiveChannel`/
-  `GetBkeServerList` resta sconosciuto.
+  live~~ — **Analizzato parzialmente**: analisi
+  statica delle stringhe ha stabilito che `SetNewLiveChannel` è una funzione
+  di libreria C interna (non un endpoint di rete) e ha mappato la vera
+  superficie HTTP (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`,
+  ecc.).
 - La causa interna esatta dell'effetto collaterale di scrittura config di
   `wifi-nurse-modal.lp` (§8) — sotto quali condizioni scatta, e se sia
   riproducibile deliberatamente — non è stata isolata ulteriormente:

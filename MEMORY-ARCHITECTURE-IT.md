@@ -426,10 +426,14 @@ riconciliata nel repo ed è segnalata qui come aperta.
   `booted` ≠ `active` noto, come osservato nell'unità 2.2.1 di §2.1: lì
   `booted=bank_2` ma `active=bank_1` in condizioni normali) prima di
   fidarsene per un piano di downgrade.
-- Relazione esatta fra `rootfs` (la sotto-partizione dinamica ~44MB) e il
-  contenuto squashfs dentro il bank attivo non ricostruita byte-per-byte
-  — l'offset dello squashfs dentro l'immagine da 80MB varia per versione
-  (vedi `RBI-FORMAT-IT.md` §3.2 per gli offset osservati su 221/245).
+- ~~Relazione esatta fra `rootfs` (la sotto-partizione dinamica ~44MB) e il
+  contenuto squashfs dentro il bank attivo non ricostruita byte-per-byte —
+  l'offset dello squashfs dentro l'immagine da 80MB varia per versione~~ —
+  **risolto**: vedi [`FIRMWARE-INTERNALS-IT.md`](FIRMWARE-INTERNALS-IT.md) §1
+  per gli offset reali osservati su 221/245 e la spiegazione (cambio di
+  layout della flash, non crescita del kernel). Il riferimento originario a
+  `RBI-FORMAT-IT.md` §3.2 era impreciso — quella sezione tratta l'evoluzione
+  della configurazione dropbear/SSH, non gli offset dello squashfs.
 - **Discrepanza kernel non ancora chiarita**: il log di boot del test del
   2026-08-23 (firmware `AGTEF_2.2.1_CLOSED.rbi` dalla cartella locale dei firmware) mostra
   `Linux version 3.4.11-rt19 ... Mar 9 2017` — kernel della generazione
