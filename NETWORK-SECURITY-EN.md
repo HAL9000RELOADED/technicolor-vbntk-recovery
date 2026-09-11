@@ -117,9 +117,30 @@ watching on units where it turns out active.
 
 A **local** MQTT broker with mutual-cert TLS on `:8883` (the corresponding
 client certificate is the `/proc/rip/011a.cert` infoblock, see
-[`MEMORY-ARCHITECTURE-EN.md`](MEMORY-ARCHITECTURE-EN.md) §4.3). Most likely
-used for companion-app pairing. **Hypothesis**, the broker's exact consumer
-not verified.
+[`MEMORY-ARCHITECTURE-EN.md`](MEMORY-ARCHITECTURE-EN.md) §4.3).
+
+**Consumer identified (2026-09-11)**: it's **`wifi_doctor_agent`**, the same
+component from §6.1. The `/usr/lib/libwifidoctoragent.so` library contains a
+full MQTT client (links `libmosquitto`, strings such as `[fhc] Established
+connection to MQTT broker`, `Using secure MQTT connection`, `chain.pem`) that
+references the exact same `/tmp/certs/` path used by mosquitto's TLS
+listener. The server-side auth plugin (`/usr/lib/mosquitto/wd_auth_plugin.so`)
+contains the string `wd_auth` — same "WD" (WiFi Doctor) prefix. The
+`wifi_doctor_agent` UCI config confirms the relationship: its `app_support`
+section self-declares `is_broker='1'`.
+
+**But on the observed unit the whole chain is dormant**, despite several UCI
+flags individually being on (`app_support.enable='1'`, `fhc.enable='1'`,
+`fhc_master.enable='1'`, while the top-level cloud toggle
+`wifi_doctor_agent.config.enabled` stays `'0'` as already noted in §6.1):
+`/tmp/certs/` doesn't exist, **no process anywhere on the system has
+`libwifidoctoragent.so` mapped into memory** (verified by scanning
+`/proc/*/maps` across every PID), no `/etc/init.d/` script references it, and
+mosquitto itself has neither a real PID nor a listening port (`8883`/`1883`
+absent from `ss -tln`) — despite `/etc/init.d/mosquitto status` reporting
+"running" (a false positive: the status check doesn't verify actual process
+liveness). In short: the broker exists as ready-to-use infrastructure, but on
+this unit nothing currently starts it and nothing currently connects to it.
 
 ### 6.3 Dropbear — `wan` (WAN, dormant) and `afg` (LAN, active) profiles
 
@@ -316,8 +337,10 @@ premises.
   mechanism on the SBC side (why a local conntrack reload produces an
   orphaned binding on the operator's end) — not verifiable without visibility
   into the SBC itself.
-- Exact consumer of the local MQTT broker (§6.2): companion-app pairing
-  assumed, not confirmed.
+- ~~Exact consumer of the local MQTT broker (§6.2): companion-app pairing
+  assumed, not confirmed~~ — **resolved**: it's `wifi_doctor_agent`, but on
+  the observed unit the whole chain (agent, certs, broker) is dormant, not an
+  active consumer.
 - Not verified whether the CWMP throttling (§2, ~200/60 s) is applied per-IP
   or globally — this changes the assessment of resistance to distributed
   brute-force.

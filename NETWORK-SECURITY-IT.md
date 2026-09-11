@@ -119,8 +119,31 @@ tenere d'occhio su unità dove risultasse attivo.
 Broker MQTT **locale** con TLS mutual-cert su `:8883` (il certificato client
 corrispondente è l'infoblock `/proc/rip/011a.cert`, vedi
 [`MEMORY-ARCHITECTURE-IT.md`](MEMORY-ARCHITECTURE-IT.md) §4.3).
-Verosimilmente usato per il pairing con l'app companion. **Ipotesi**, non
-verificato il consumatore esatto del broker.
+
+**Consumatore identificato (2026-09-11)**: è **`wifi_doctor_agent`**, lo
+stesso componente di §6.1. La libreria `/usr/lib/libwifidoctoragent.so`
+contiene un client MQTT completo (linka `libmosquitto`, stringhe come
+`[fhc] Established connection to MQTT broker`, `Using secure MQTT
+connection`, `chain.pem`) che referenzia esattamente lo stesso percorso
+`/tmp/certs/` usato dal listener TLS di mosquitto. Il plugin di
+autenticazione lato server (`/usr/lib/mosquitto/wd_auth_plugin.so`) contiene
+la stringa `wd_auth` — stesso prefisso "WD" (WiFi Doctor). La UCI di
+`wifi_doctor_agent` conferma la relazione: la sezione `app_support` si
+autodichiara `is_broker='1'`.
+
+**Ma sull'unità osservata l'intera catena risulta dormiente**, nonostante
+alcuni flag UCI individualmente accesi (`app_support.enable='1'`,
+`fhc.enable='1'`, `fhc_master.enable='1'`, mentre il toggle cloud principale
+`wifi_doctor_agent.config.enabled` resta `'0'` come già in §6.1): `/tmp/certs/`
+non esiste, **nessun processo su tutto il sistema ha `libwifidoctoragent.so`
+mappato in memoria** (verificato scansionando `/proc/*/maps` per ogni PID),
+nessuno script `/etc/init.d/` la referenzia, e mosquitto stesso non ha né un
+PID reale né una porta in ascolto (`8883`/`1883` assenti da `ss -tln`) —
+nonostante `/etc/init.d/mosquitto status` risponda "running" (falso
+positivo: il controllo di stato non verifica la liveness reale del
+processo). In sintesi: il broker esiste come infrastruttura pronta all'uso,
+ma su questa unità non c'è attualmente nulla che lo avvii né nulla che vi si
+connetta.
 
 ### 6.3 Dropbear — profili `wan` (WAN, dormiente) e `afg` (LAN, attivo)
 
@@ -324,8 +347,10 @@ del loro SBC, non risolvibile da postazione cliente.
   sintomo). Resta ipotetico solo il meccanismo interno esatto lato SBC
   (perché un reload conntrack locale produce un binding orfano lato
   operatore) — non verificabile senza visibilità sull'SBC stesso.
-- Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
-  companion, non confermato.
+- ~~Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
+  companion, non confermato~~ — **risolto**: è `wifi_doctor_agent`, ma
+  sull'unità osservata l'intera catena (agente, certificati, broker) è
+  dormiente, non un consumatore attivo.
 - Non verificato se il throttling CWMP (§2, ~200/60 s) sia applicato
   per-IP o globale — cambia la valutazione della resistenza al brute-force
   distribuito.
