@@ -176,13 +176,44 @@ options) — expected noise, not an error.
 
 **`nanocdn-core` runs correctly**: stable, TIM-branded build
 (`v2.6.2@5365-tim`), listens on `18081`, answers `/nanocdnstatus.xml`,
-`/crossdomain.xml` and `/clientaccesspolicy.xml` with valid content. Its
-proprietary STB-agent API (`BkStbA`, strings include `SetNewLiveChannel` and
-`/GetBkeServerList`) is reachable but its call sequence for requesting a live
-channel was not reverse-engineered in this session (undocumented,
-Flash/Silverlight-era "QualityLevels()/Fragments()" and HLS/DASH manifest
-patterns are present in the binary, consistent with Microsoft Smooth
-Streaming + HLS/DASH output support).
+`/crossdomain.xml` and `/clientaccesspolicy.xml` with valid content.
+
+**Clarification on `BkStbA` (2026-09-11, static binary-string analysis only —
+no live requests made, deliberately, to avoid any risk of circumventing DRM
+on third-party content)**: `BkStbA` is Broadpeak's client library for
+multicast IPTV reception (version `BkStbA 2.2.0`, `msync_bkstba` module),
+statically linked into `nanocdn-core`. Important correction to the earlier
+phrasing: **`BkStbA_SetNewLiveChannel` and `BkStbA_CreateLiveStream` are
+internal C library functions** (seen in the strings as `BkStbA.c:<line>`
+references, never as HTTP paths) — they handle multicast group join/leave,
+**Fast Channel Change (FCC)**, **unicast RTP retry** for lost multicast
+packets, and **FEC** (forward error correction). They are not reachable over
+the network as HTTP endpoints in this binary — they're the API the *rest* of
+`nanocdn-core`'s own code uses to drive the library, not something an
+external STB calls directly.
+
+Other URL-shaped strings also show up in the binary, whose direction (served
+by `nanocdn-core` inbound on `18081`, versus templates `nanocdn-core` itself
+uses for outbound requests) **isn't confirmed by strings alone** — consistent
+with the fact that this file already serves `crossdomain.xml`/
+`clientaccesspolicy.xml` inbound, which makes server-side exposure plausible
+but not certain: `/QualityLevels(`, `/Fragments(`, `/Segment`, `/Level`,
+`/Alter` — **Microsoft Smooth Streaming** manifest/segment request syntax (a
+precise confirmation of the earlier "Flash/Silverlight-style pattern" guess,
+now identified as standard MSS syntax) — and `/nservices/metricsReceiver`
+(a name consistent with a metrics-collection endpoint, likely received rather
+than requested, but not verified). Same level of uncertainty applies to
+`/GetBkeServerList`, which appears as an isolated string; its direction
+(whether `nanocdn-core` requests it from a Broadpeak/operator
+backend, or exposes it itself) isn't determinable from strings alone and was
+not tested.
+
+The overall picture is therefore a **standard multicast IPTV redirector/
+relay for the subscription's linear channels** (multicast join + FCC + RTP
+retry + ABR via Smooth Streaming) — common telco-IPTV technology, distinct in
+concept from a separate third-party OTT app with DRM (Widevine/PlayReady),
+such as a subscription sports-streaming service, which typically runs as its
+own certified app and doesn't depend on this local redirector.
 
 **`nanocdn-rr` crash-loops continuously** (`ERROR could not bind to any
 interface`, respawned by `procd` every ~5s, `respawn 3600 5 0`). Ruled out as
@@ -349,9 +380,15 @@ premises.
 - Single-unit snapshot with community firmware: firewall values and ACS
   profiles could differ on the factory TIM stock — not compared in this
   session.
-- `nanocdn-core`'s `BkStbA` STB-agent protocol (§7) was not reverse-engineered
-  far enough to actually request and play a live channel — the exact
-  `SetNewLiveChannel`/`GetBkeServerList` call format remains unknown.
+- ~~`nanocdn-core`'s `BkStbA` STB-agent protocol (§7) was not
+  reverse-engineered far enough to actually request and play a live
+  channel~~ — **clarified, not completed by deliberate choice**: static
+  string analysis established that `SetNewLiveChannel` is an internal C
+  library function (not a network endpoint) and mapped the real HTTP surface
+  (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`, etc.).
+  Actually requesting/playing a live channel was not attempted: doing so
+  would risk touching DRM circumvention on third-party content, regardless of
+  the user's own subscription status — out of scope for this repo.
 - The exact internal cause of `wifi-nurse-modal.lp`'s config-write side effect
   (§8) — under what conditions it triggers, and whether it can be reproduced
   deliberately — was not isolated further; observed once, empirically, not

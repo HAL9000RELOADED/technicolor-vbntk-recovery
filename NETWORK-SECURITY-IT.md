@@ -180,13 +180,46 @@ dell'altro binario) — rumore atteso, non un errore.
 
 **`nanocdn-core` funziona correttamente**: stabile, build brandizzata TIM
 (`v2.6.2@5365-tim`), in ascolto su `18081`, risponde a `/nanocdnstatus.xml`,
-`/crossdomain.xml` e `/clientaccesspolicy.xml` con contenuto valido. La sua
-API proprietaria STB-agent (`BkStbA`, nelle stringhe compaiono
-`SetNewLiveChannel` e `/GetBkeServerList`) è raggiungibile, ma la sequenza di
-chiamate per richiedere un canale live non è stata decodificata in questa
-sessione (non documentata; nel binario sono presenti pattern in stile
-Flash/Silverlight "QualityLevels()/Fragments()" e manifest HLS/DASH, coerenti
-con supporto a Microsoft Smooth Streaming + HLS/DASH in output).
+`/crossdomain.xml` e `/clientaccesspolicy.xml` con contenuto valido.
+
+**Chiarimento su `BkStbA` (2026-09-11, solo analisi statica delle stringhe
+del binario — nessuna richiesta live effettuata, deliberatamente, per non
+rischiare di aggirare eventuali protezioni DRM su contenuti terzi)**:
+`BkStbA` è la libreria client Broadpeak per la ricezione IPTV multicast
+(versione `BkStbA 2.2.0`, modulo `msync_bkstba`), integrata staticamente in
+`nanocdn-core`. Punto importante che corregge la formulazione precedente:
+**`BkStbA_SetNewLiveChannel` e `BkStbA_CreateLiveStream` sono funzioni di
+libreria C interne** (viste nelle stringhe come riferimenti a
+`BkStbA.c:<riga>`, mai come percorsi HTTP) — gestiscono il join/leave del
+gruppo multicast, il **Fast Channel Change (FCC)**, il **retry RTP in
+unicast** per i pacchetti multicast persi, e il **FEC** (correzione errori
+in avanti). Non risultano raggiungibili da rete come endpoint HTTP in questo
+binario — sono l'API con cui il *resto* del codice di `nanocdn-core`
+comanda la libreria, non qualcosa che uno STB esterno invoca direttamente.
+
+Dalle stringhe emergono anche altri percorsi in stile URL, la cui direzione
+(esposti da `nanocdn-core` in ingresso su `18081`, oppure template usati da
+`nanocdn-core` stesso per richieste in uscita) **non è confermata solo dalle
+stringhe** — coerente col fatto che il file serve già `crossdomain.xml`/
+`clientaccesspolicy.xml` in ingresso, il che rende plausibile ma non certa
+un'esposizione lato server: `/QualityLevels(`, `/Fragments(`, `/Segment`,
+`/Level`, `/Alter` — sintassi di richiesta **Microsoft Smooth Streaming** per
+manifest/segmenti ABR (conferma precisa dell'ipotesi precedente "pattern in
+stile Flash/Silverlight", ora identificata come sintassi MSS standard) — e
+`/nservices/metricsReceiver` (nome coerente con un endpoint di raccolta
+metriche, verosimilmente ricevuto piuttosto che richiesto, ma non verificato).
+Stesso livello di incertezza per `/GetBkeServerList`, che compare come
+stringa isolata; la direzione (se è `nanocdn-core` a
+richiederlo a un backend Broadpeak/operatore, o se lo espone lui stesso) non
+è determinabile dalle sole stringhe e non è stata testata.
+
+Il quadro complessivo è quindi quello di un **redirector/relay IPTV
+multicast standard per i canali lineari inclusi nell'abbonamento**
+(join multicast + FCC + retry RTP + ABR via Smooth Streaming) — una
+tecnologia telco-IPTV comune, concettualmente distinta da un'eventuale app
+OTT con DRM (Widevine/PlayReady) di terze parti come servizi di streaming
+sportivo in abbonamento separato, che tipicamente gira come app certificata
+a sé stante e non dipende da questo redirector locale.
 
 **`nanocdn-rr` va in crash-loop continuo** (`ERROR could not bind to any
 interface`, rilanciato da `procd` ogni ~5s, `respawn 3600 5 0`). Escluse come
@@ -359,10 +392,16 @@ del loro SBC, non risolvibile da postazione cliente.
 - Snapshot di una sola unità con firmware community: i valori del firewall e
   dei profili ACS potrebbero differire sullo stock TIM di fabbrica —
   non comparato in questa sessione.
-- Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
+- ~~Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
   decodificato a sufficienza per richiedere e riprodurre davvero un canale
-  live — il formato esatto delle chiamate `SetNewLiveChannel`/
-  `GetBkeServerList` resta sconosciuto.
+  live~~ — **chiarito, non completato per scelta deliberata**: analisi
+  statica delle stringhe ha stabilito che `SetNewLiveChannel` è una funzione
+  di libreria C interna (non un endpoint di rete) e ha mappato la vera
+  superficie HTTP (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`,
+  ecc.). La richiesta/riproduzione effettiva di un canale live non è stata
+  tentata: rischierebbe di coinvolgere l'aggiramento di protezioni DRM di
+  contenuti di terze parti, indipendentemente dall'abbonamento dell'utente —
+  fuori perimetro per questo repo.
 - La causa interna esatta dell'effetto collaterale di scrittura config di
   `wifi-nurse-modal.lp` (§8) — sotto quali condizioni scatta, e se sia
   riproducibile deliberatamente — non è stata isolata ulteriormente:
