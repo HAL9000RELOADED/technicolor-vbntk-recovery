@@ -1,0 +1,26 @@
+-- xupnpd config for a DGA4130/VBNT-K deployed on USB storage (/opt/xupnpd)
+-- Start from the upstream src/xupnpd.lua template and only change the lines
+-- below to match your router -- do not strip cfg={} or the trailing dofile(),
+-- both are required for the daemon to actually start.
+
+cfg={}
+
+-- ... keep the rest of the upstream template as-is ...
+
+-- LAN bridge for SSDP announcements (standard OpenWrt/TCH name)
+cfg.ssdp_interface='br-lan'
+
+-- downstream interface carrying the IPTV multicast VLAN (VLAN 836 on this
+-- router model, device name confirmed via `ip -brief link` / `uci show network`)
+cfg.mcast_interface='iptvptm0'
+
+-- run in foreground under procd instead of self-daemonizing
+cfg.daemon=false
+cfg.embedded=true
+
+cfg.http_port=4044
+cfg.proxy=2
+cfg.name='UPnP-IPTV'
+
+-- ... keep playlist={} / feeds={} and everything after, ending with:
+-- dofile('xupnpd_main.lua')

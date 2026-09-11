@@ -24,6 +24,8 @@
 - [`AGTEF-1.1.3-UNOFFICIAL-EN.md`](AGTEF-1.1.3-UNOFFICIAL-EN.md) — comparison with the **unofficial** 1.1.3 build (root pre-enabled), derived from 1.0.3 — not an official release
 - [`UART-BOOT-LOG-IT.md`](UART-BOOT-LOG-IT.md) — trascrizione commentata di un boot seriale reale (Boot ROM, CFE, kernel Linux, recovery BOOTP/TFTP) con spiegazione dei checkpoint a 4 caratteri
 - [`UART-BOOT-LOG-EN.md`](UART-BOOT-LOG-EN.md) — annotated transcript of a real serial boot (Boot ROM, CFE, Linux kernel, BOOTP/TFTP recovery) with the 4-character checkpoints explained
+- [`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) — bug del flag "installato" nell'App Store modgui, feed pacchetti morto, compilazione da sorgente (toolchain armel soft-float statico) e deploy di xupnpd (relay UPnP/DLNA IPTV)
+- [`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) — modgui App Store "installed"-flag bug, dead package feed, from-source build (static armel soft-float toolchain) and deploy of xupnpd (UPnP/DLNA IPTV relay)
 
 ## Contents / Contenuto
 
@@ -31,6 +33,10 @@
 - `scripts/tftpd32.ini.example` — working Tftpd64 configuration used for the TFTP-only recovery server
 - `root/afg_inject_*.py` — three AutoFlashGUI-based command-injection rooting attempts (all failed on AGTEF_2.4.5 -- see the root guide)
 - `root/import_config.py` — working script for the stock UI's undocumented configuration import endpoint (no root needed)
+- `xupnpd-iptv/Makefile.armel-tim` — cross-compile Makefile for clark15b/xupnpd targeting this router's exact ABI (armel soft-float, static)
+- `xupnpd-iptv/xupnpd.lua.example` — config lines to change from the upstream template
+- `xupnpd-iptv/xupnpd.init` — procd init script for `/etc/init.d/xupnpd`
+- `xupnpd-iptv/appInstallRemoveUtility.sh.patch.md` — fix for the modgui App Store "installed"-flag bug
 
 ## Hardware / Software involved
 

@@ -1,0 +1,16 @@
+# armel soft-float, glibc (TIM DGA4130 / VBNT-K, EABI5 soft-float, glibc 2.27)
+# Use with clark15b/xupnpd's src/rules.mk build system:
+#   cp Makefile.armel-tim <xupnpd-repo>/src/
+#   cd <xupnpd-repo>/src && make -f Makefile.armel-tim
+STAGING_DIR     =
+BIN             =
+LIBEXEC         =
+CC              = arm-linux-gnueabi-gcc
+CPP             = arm-linux-gnueabi-g++
+STRIP           = arm-linux-gnueabi-strip
+RM              = rm
+PLATFORM        = armel-tim
+TARGET_DIR      = .
+MY_CFLAGS       = -static -marm -march=armv7-a -mfloat-abi=soft
+
+include rules.mk
