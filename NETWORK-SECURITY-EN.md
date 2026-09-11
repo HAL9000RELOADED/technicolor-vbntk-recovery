@@ -274,13 +274,28 @@ consistent with this file's policy):
 [...] mmpbxd[9774]: SIP Registration: SIP: <number> : Register Success
 ```
 
-**Why it happened**: not determinable with certainty from the client side —
-it's internal state on the operator's SBC, not inspectable from here. The
-most likely hypothesis is a stale Contact/binding on their softswitch
-(typical cause: an earlier network event — e.g. a WAN IP change, or a long
-idle window between two REGISTERs given the observed ~55-58 minute interval —
-leaves the SBC holding a binding that points to a path that's no longer
-valid, while the client itself still considers itself "registered").
+**Why it happened — trigger confirmed by the user**: about one minute before
+the line went unreachable, the user had manually disabled the SIP helper on
+the Modgui panel's "NAT Helper" tab (a deliberate action, unrelated to this
+session's own work). The ~1-minute timing makes the causal link very likely:
+flipping that toggle almost certainly reloads the router's iptables/conntrack
+rules, which can cut the tracking state for the then-active SIP UDP session
+mid-flight — the operator's SBC sees what looks like a client-side network
+path reset without a clean explicit DEREGISTER, and is left holding an
+"orphaned" binding/Contact pointing at a path that's no longer coherent,
+while still considering the number "registered" until it naturally expires.
+
+Note that the SIP ALG module itself (`nf_conntrack_sip`/`nf_nat_sip`, §9 point
+3) is NOT the direct cause of the problem — it remains true that it's not
+assigned to the `wan` zone and never touches this unit's native traffic. It's
+**the act of toggling it off from the panel** (with the resulting
+firewall/conntrack rule reload) that triggered the disruption, not the ALG
+itself or its resulting state (disabled). Consistent with this: after the
+fix, the user left the SIP helper disabled in the NAT helper and the line has
+kept working normally — the same configuration already observed in point 3
+above (`sip` absent from the `wan` zone) — so the problem doesn't depend on
+whether the helper is on or off, only on the moment it gets changed while a
+registration is active.
 
 **How to apply if this recurs**: if inbound calls fail with "unreachable"
 while the router shows "Registered", don't waste time re-checking local SIP
@@ -294,10 +309,13 @@ premises.
 
 ## 10. Open questions / to verify
 
-- Exact internal cause of the stale SBC-side binding (§9): not determinable
-  from the client side — unclear whether tied to an earlier network event
-  (WAN IP renewal, DSL resync) or something else; observed once, resolved by
-  restarting the service, not isolated further.
+- ~~Exact internal cause of the stale SBC-side binding (§9): not determinable
+  from the client side~~ — **resolved**: trigger confirmed by the user
+  (manually toggling the SIP helper off in the NAT Helper panel, ~1 minute
+  before the symptom). What remains hypothetical is only the exact internal
+  mechanism on the SBC side (why a local conntrack reload produces an
+  orphaned binding on the operator's end) — not verifiable without visibility
+  into the SBC itself.
 - Exact consumer of the local MQTT broker (§6.2): companion-app pairing
   assumed, not confirmed.
 - Not verified whether the CWMP throttling (§2, ~200/60 s) is applied per-IP

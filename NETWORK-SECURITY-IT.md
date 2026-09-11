@@ -281,13 +281,30 @@ riportati, coerente con la policy di questo file):
 [...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Register Success
 ```
 
-**Perché è successo**: non determinabile con certezza lato cliente — è uno
-stato interno dell'SBC dell'operatore, non ispezionabile da qui. L'ipotesi più
-probabile è un binding/Contact non aggiornato sul loro softswitch (causa
-tipica: un evento di rete precedente — es. un cambio dell'IP WAN o una
-finestra di inattività prolungata tra due REGISTER, dato l'intervallo di
-~55-58 minuti osservato — lascia l'SBC con un binding che punta a un percorso
-non più valido, pur restando "registrato" dal punto di vista del client).
+**Perché è successo — trigger confermato dall'utente**: circa un minuto prima
+che la fonia diventasse irraggiungibile, l'utente aveva disabilitato
+manualmente l'helper SIP nella scheda "NAT Helper" del pannello Modgui
+(azione volontaria, non collegata al lavoro di questa sessione). La
+tempistica (~1 minuto) rende il collegamento causale molto probabile: cambiare
+quel toggle fa quasi certamente ricaricare le regole iptables/conntrack sul
+router, il che può interrompere a metà lo stato di tracking della sessione
+SIP UDP allora attiva — l'SBC dell'operatore riceve quello che sembra un
+riavvio/reset del percorso di rete del client senza un DEREGISTER esplicito
+pulito, e resta con un binding/Contact ormai "orfano" che punta a un percorso
+non più coerente, pur continuando a considerare il numero "registrato" fino
+alla scadenza naturale.
+
+Notare che il modulo SIP ALG (`nf_conntrack_sip`/`nf_nat_sip`, §9 punto 3) NON
+è la causa diretta del problema — resta vero che non è assegnato alla zona
+`wan` e non interviene mai sul traffico nativo di questa unità. È **il gesto
+di disabilitarlo dal pannello** (con il conseguente reload delle regole
+firewall/conntrack) ad aver innescato l'interruzione, non l'ALG in sé stesso
+né il suo stato finale (disabilitato). Consistente con questo: dopo il fix,
+l'utente ha lasciato l'helper SIP disabilitato nel NAT helper e la fonia
+continua a funzionare normalmente — è la stessa configurazione già osservata
+al punto 3 sopra (`sip` assente dalla zona `wan`), quindi il problema non
+dipende dallo stato acceso/spento dell'helper, solo dal momento in cui è
+stato cambiato mentre una registrazione era attiva.
 
 **Come applicare se si ripresenta**: se le chiamate in ingresso falliscono con
 "non raggiungibile" mentre il router mostra "Registrato", non perdere tempo a
@@ -301,10 +318,12 @@ del loro SBC, non risolvibile da postazione cliente.
 
 ## 10. Aperture / da verificare
 
-- Causa interna esatta del binding stantio lato SBC (§9): non determinabile
-  dal lato cliente — non è noto se legata a un evento di rete precedente
-  (rinnovo IP WAN, resync DSL) o ad altro; osservata una volta, risolta col
-  restart del servizio, non isolata ulteriormente.
+- ~~Causa interna esatta del binding stantio lato SBC (§9): non determinabile
+  dal lato cliente~~ — **risolto**: trigger confermato dall'utente (toggle
+  manuale dell'helper SIP nel pannello NAT Helper, ~1 minuto prima del
+  sintomo). Resta ipotetico solo il meccanismo interno esatto lato SBC
+  (perché un reload conntrack locale produce un binding orfano lato
+  operatore) — non verificabile senza visibilità sull'SBC stesso.
 - Consumatore esatto del broker MQTT locale (§6.2): ipotizzato pairing app
   companion, non confermato.
 - Non verificato se il throttling CWMP (§2, ~200/60 s) sia applicato
