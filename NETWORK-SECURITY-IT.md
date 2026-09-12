@@ -23,7 +23,7 @@ stato modificato**.
 > pubblici e vengono riportati (coerente con la convenzione già usata nel
 > repo per la fonia/ACS).
 
-## 1. Firewall — default deny/reject solido su WAN (Osservato)
+## 1. Firewall — default deny/reject solido su WAN 
 
 La policy di default verso la WAN è **chiusa**: i servizi di gestione sono
 tutti bloccati esplicitamente dall'esterno.
@@ -39,7 +39,7 @@ Nessuno di questi è raggiungibile dalla WAN nella configurazione osservata.
 L'unica eccezione rilevante è il canale di gestione remota dell'operatore
 (CWMP/TR-069), trattato in §2.
 
-## 2. CWMP / TR-069 — unica superficie WAN reale (Osservato)
+## 2. CWMP / TR-069 — unica superficie WAN reale
 
 La porta **7170/tcp** (Connection Request TR-069) è **aperta a tutta la WAN**:
 
@@ -86,7 +86,7 @@ firmware. (Si collega alla verifica firma lato device di
 [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §6: anche il path `sysupgrade` verrebbe
 comunque sottoposto ai controlli di firma/header lì descritti.)
 
-## 4. UPnP attivo (Osservato)
+## 4. UPnP attivo 
 
 Il demone **`miniupnpd-igdv2`** è attivo e, al momento dell'audit, aveva
 forward dinamici verso host della LAN interna (IP specifici **non riportati**
@@ -94,7 +94,7 @@ forward dinamici verso host della LAN interna (IP specifici **non riportati**
 osservato oltre a quelli standard IGDv2. Da tenere presente come superficie
 LAN-side: un'app/host interno compromesso può aprire forward automaticamente.
 
-## 5. Servizi già noti — confermati spenti/disabilitati (Osservato)
+## 5. Servizi già noti — confermati spenti/disabilitati 
 
 Servizi già citati in sessioni precedenti, ricontrollati qui e confermati
 **disabilitati**: `iperf`, `urlfilterd`, `dnsfilterd`, `gre-hotspotd`. Nessuno
@@ -104,7 +104,7 @@ di questi è in ascolto.
 sessione (oltre al canale ACS legittimo di §2 e al broker MQTT locale di §6,
 che è locale).
 
-## 6. Sezioni UCI mai documentate prima nel repo (Osservato)
+## 6. Sezioni UCI mai documentate prima nel repo
 
 ### 6.1 `wifi_doctor_agent`
 
@@ -169,7 +169,7 @@ ottenesse accesso in scrittura alla config potrebbe riattivare SSH WAN senza
 aggiungere nulla di nuovo. Coerente con l'evoluzione dropbear documentata in
 [`RBI-FORMAT-IT.md`](RBI-FORMAT-IT.md) §3.2.
 
-## 7. Broadpeak nanoCDN / MABR, il redirector IPTV — conflitto di bind tra due istanze (Osservato, 2026-09-09)
+## 7. Broadpeak nanoCDN / MABR, il redirector IPTV — conflitto di bind tra due istanze
 
 `system.mabr.enabled = '1'`. `/etc/init.d/nanocdn` (procd) avvia **due**
 binari distinti dallo **stesso** file di configurazione condiviso
@@ -258,7 +258,41 @@ crash-loop, nessuna regressione funzionale osservata (il ruolo di redirector
 IPTV — quello effettivamente utile — non dipende dalla presenza di
 `nanocdn-rr`).
 
-## 8. ⚠️ `wifi-nurse-modal.lp` non è una GET di sola lettura sicura (Osservato, 2026-09-09)
+### Aggiornamento — `nanocdn-rr` avviato con successo dal vivo: causa del bind-fail ridefinita
+
+Dopo il fix, `nanocdn-rr` non
+era in crash-loop ma **sopravviveva come processo orfano** da un avvio
+precedente, in ascolto e **funzionante** sulla porta TCP **8000** — non
+`18081`/`18082` come nel file di configurazione condiviso. Questo ha permesso
+di osservarne per la prima volta il comportamento reale quando riesce a
+partire: è un **reverse proxy HTTP trasparente basato sull'header `Host:`**
+della richiesta — se combacia con uno degli hostname CDN dell'operatore
+elencati in `smartlib-conf`, inoltra la richiesta alla vera CDN (confermato
+da header `Via:` con hostname reali della dorsale dell'operatore nella
+risposta) oppure la serve dal buffer multicast locale.
+
+Riavviandolo a mano con lo stesso `--conf` condiviso, il fallimento di bind si
+riproduce identico (`ERROR could not bind to any interface`) — ma il log,
+letto per intero, mostra `unknown option` anche per diverse direttive **nel
+proprio namespace** (prefisso `rr-*`, quindi non riconducibili "all'altro
+binario" come ipotizzato sopra), assenti da qualsiasi build più vecchia:
+segno che il file di configurazione condiviso — aggiornato da remoto
+dall'operatore via il canale ACS/CWMP di §2 — è ora scritto per uno
+schema/versione del protocollo Broadpeak più recente di quella che il
+binario installato su questo firmware riconosce. Avviato invece **senza
+alcun file di configurazione** (sui default compilati), il bind su
+`0.0.0.0:8000` riesce sempre, e il relay funziona come descritto sopra.
+
+Questo non esclude l'ipotesi originale (bind-race sul control channel
+multicast condiviso con `nanocdn-core`) come concausa ma aggiunge un fattore concreto e
+riproducibile, il disallineamento di versione config/binario. Il fix già
+documentato sopra (rimuovere l'istanza da `/etc/init.d/nanocdn`) resta valido
+come misura di stabilità; per chi ha invece bisogno del relay HTTP di
+`nanocdn-rr` (utile ad esempio per bridge UPnP/DLNA di terze parti, vedi
+[`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) §6), l'unica modalità osservata
+funzionante è avviarlo a parte, senza `--conf`.
+
+## 8. ⚠️ `wifi-nurse-modal.lp` non è una GET di sola lettura sicura
 
 Una semplice `GET /modals/wifi-nurse-modal.lp` è stata osservata, su questa
 stessa classe di unità, innescare **logica di scrittura lato server** invece
@@ -283,7 +317,7 @@ come un'operazione di **scrittura**, non una lettura sicura.
 `cwmpconf-modal.lp` (config CWMP/ACS) porta lo stesso tipo di rischio e
 andrebbe escluso dalle scansioni di routine per lo stesso motivo.
 
-## 9. VoIP/SIP: "cliente non raggiungibile" nonostante stato "Registrato" — binding stantio lato SBC dell'operatore (Osservato/Risolto, 2026-09-11)
+## 9. VoIP/SIP: "cliente non raggiungibile" nonostante stato "Registrato" — binding stantio lato SBC dell'operatore
 
 Sintomo: chiamando il numero fisso (fonia via `mmpbxd`, profilo SIP verso
 registrar `telecomitalia.it` / proxy `88.50.251.167:5060`) da un cellulare di
@@ -332,7 +366,7 @@ riportati, coerente con la policy di questo file):
 [...] mmpbxd[9774]: SIP Registration: SIP: <numero> : Register Success
 ```
 
-**Perché è successo — meccanismo verificato nel codice, non solo ipotizzato**:
+**Perché è successo — meccanismo verificato nel codice**:
 l'utente ha confermato di aver disabilitato manualmente l'helper SIP nella
 scheda "NAT Helper" del pannello Modgui circa un minuto prima che la fonia
 diventasse irraggiungibile (azione volontaria, non collegata al lavoro di
@@ -411,11 +445,16 @@ del loro SBC, non risolvibile da postazione cliente.
   non comparato in questa sessione.
 - ~~Il protocollo STB-agent `BkStbA` di `nanocdn-core` (§7) non è stato
   decodificato a sufficienza per richiedere e riprodurre davvero un canale
-  live~~ — **Analizzato parzialmente**: analisi
+  live~~ — **Analizzato**: l' analisi
   statica delle stringhe ha stabilito che `SetNewLiveChannel` è una funzione
   di libreria C interna (non un endpoint di rete) e ha mappato la vera
   superficie HTTP (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`,
-  ecc.).
+  ecc.). **Ulteriormente avanzato** (aggiornamento §7, 2026-09-12: confermato 
+  che `nanocdn-rr` (non `BkStbA` direttamente) raggiunge
+  davvero la CDN dell'operatore per un'entry del catalogo canali live,
+  provando il meccanismo di relay HTTP end-to-end — la riproduzione
+  effettiva di un canale resta non raggiunta nel test (sessione del catalogo
+  scaduta al momento della prova).
 - La causa interna esatta dell'effetto collaterale di scrittura config di
   `wifi-nurse-modal.lp` (§8) — sotto quali condizioni scatta, e se sia
   riproducibile deliberatamente — non è stata isolata ulteriormente:

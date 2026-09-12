@@ -22,7 +22,7 @@ derived from `uci show`, firewall tables and service state on the unit;
 > reported (consistent with the convention already used in the repo for
 > telephony/ACS).
 
-## 1. Firewall — solid default deny/reject on WAN (Observed)
+## 1. Firewall — solid default deny/reject on WAN
 
 The default policy toward the WAN is **closed**: management services are all
 explicitly blocked from outside.
@@ -93,7 +93,7 @@ generalized as "internal LAN hosts"). No additional control observed beyond
 the standard IGDv2 ones. Worth keeping in mind as a LAN-side surface: a
 compromised internal app/host can open forwards automatically.
 
-## 5. Previously-known services — confirmed off/disabled (Observed)
+## 5. Previously-known services — confirmed off/disabled
 
 Services already mentioned in prior sessions, re-checked here and confirmed
 **disabled**: `iperf`, `urlfilterd`, `dnsfilterd`, `gre-hotspotd`. None of
@@ -103,7 +103,7 @@ them is listening.
 (beyond the legitimate ACS channel of §2 and the local MQTT broker of §6,
 which is local).
 
-## 6. UCI sections never documented before in the repo (Observed)
+## 6. UCI sections never documented before in the repo
 
 ### 6.1 `wifi_doctor_agent`
 
@@ -165,7 +165,7 @@ knowing: an attacker gaining write access to the config could re-enable WAN
 SSH without adding anything new. Consistent with the dropbear evolution
 documented in [`RBI-FORMAT-EN.md`](RBI-FORMAT-EN.md) §3.2.
 
-## 7. Broadpeak nanoCDN / MABR IPTV redirector — dual-instance bind conflict (Observed, 2026-09-09)
+## 7. Broadpeak nanoCDN / MABR IPTV redirector — dual-instance bind conflict
 
 `system.mabr.enabled = '1'`. `/etc/init.d/nanocdn` (procd) starts **two**
 separate binaries from the **same** shared config file
@@ -228,20 +228,6 @@ causes, each independently verified on the live unit:
   address; it is more likely the address `nanocdn-rr` uses to reach
   `nanocdn-core` as an upstream, not something it binds itself.
 
-**Best-supported remaining hypothesis**: both binaries try to open their own
-"control channel multicast receiver" (binary string: `Control channel
-multicast receiver started on multicast '%s:%s'`) on the identical
-`controlchannel-multicast=239.200.0.0:5004` value, on the same interface
-(`br-lan`). `nanocdn-core` starts first (script order) and wins the bind;
-`nanocdn-rr`'s later attempt fails, and the binary reports a generic
-"any interface" message instead of a specific "address in use" — plausible if
-the multicast receive socket isn't opened with `SO_REUSEADDR`/`SO_REUSEPORT`.
-This fits Broadpeak's own documented role split (`nanocdn-rr` is the
-load-balancing "Request Router" **across multiple** `nanocdn-core` instances,
-a real CDN-scale-out pattern) — on a single-box home CPE with exactly one
-`nanocdn-core`, the two are structurally redundant and appear not to have been
-tested/designed to coexist on the same host/interface.
-
 **Fix applied on this unit**: the `nanocdn-rr` instance block was removed
 from `/etc/init.d/nanocdn` (`procd_open_instance nanocdn-rr` ... 
 `procd_close_instance`), `nanocdn-core`'s block left untouched (backup of the
@@ -249,6 +235,39 @@ original script kept alongside it). Confirmed after restart: `nanocdn-core`
 still stable and listening on `18081`, no more respawn-loop, no functional
 regression observed (the core IPTV-redirector role — the actually useful
 one — does not depend on `nanocdn-rr` being present).
+
+### `nanocdn-rr` observed running live: bind-fail cause reframed
+
+After the fix, `nanocdn-rr` was not
+crash-looping but **survived as an orphaned process** from an earlier boot,
+listening and **working** on TCP port **8000** — not `18081`/`18082` as in
+the shared config file. This made it possible to observe its real behavior
+for the first time when it does start successfully: it's a **transparent
+HTTP reverse proxy keyed on the request's `Host:` header** — when it matches
+one of the operator's CDN hostnames listed in `smartlib-conf`, it forwards
+the request to the real CDN (confirmed by `Via:` headers naming real
+operator backbone hosts in the response) or serves it from the local
+multicast buffer.
+
+Manually restarting it with the same shared `--conf` reproduces the bind
+failure identically (`ERROR could not bind to any interface`) — but the log,
+read in full, also shows `unknown option` for several directives **in its
+own namespace** (`rr-*` prefix, so not attributable to "the other binary" as
+hypothesized above), absent from any older build: a sign that the shared
+config file — updated remotely by the operator over the ACS/CWMP channel in
+§2 — is now written for a newer Broadpeak protocol/schema version than the
+binary installed on this firmware understands. Started instead **with no
+config file at all** (compiled-in defaults), the bind on `0.0.0.0:8000`
+always succeeds, and the relay works as described above.
+
+This doesn't rule out the original hypothesis (bind-race on the multicast
+control channel shared with `nanocdn-core`) as a contributing cause but it adds a 
+concrete, reproducible factor: the config/binary version mismatch. The fix already
+documented above (removing the instance from `/etc/init.d/nanocdn`) remains
+valid as a stability measure; for anyone who actually needs `nanocdn-rr`'s
+HTTP relay (useful e.g. for third-party UPnP/DLNA bridges, see
+[`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) §6), the only mode observed working
+is starting it standalone, without `--conf`.
 
 ## 8. ⚠️ `wifi-nurse-modal.lp` is not a safe read-only GET (Observed, 2026-09-09)
 
@@ -398,10 +417,15 @@ premises.
   session.
 - ~~`nanocdn-core`'s `BkStbA` STB-agent protocol (§7) was not
   reverse-engineered far enough to actually request and play a live
-  channel~~ — **Partially Analyzed**: static
+  channel~~ — **Analyzed**: static
   string analysis established that `SetNewLiveChannel` is an internal C
   library function (not a network endpoint) and mapped the real HTTP surface
   (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`, etc.).
+  Confirmed
+  `nanocdn-rr` (not `BkStbA` directly) actually reaching the operator's CDN
+  for a live channel-catalog entry, proving the HTTP relay mechanism
+  end-to-end — actually playing a channel remains unreached in the test (the
+  catalog session had expired by the time of the attempt).
 - The exact internal cause of `wifi-nurse-modal.lp`'s config-write side effect
   (§8) — under what conditions it triggers, and whether it can be reproduced
   deliberately — was not isolated further; observed once, empirically, not

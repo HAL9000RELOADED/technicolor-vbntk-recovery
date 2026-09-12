@@ -117,9 +117,76 @@ Nota: il servizio si lega all'IP della LAN bridge (`br-lan`), non a
 `127.0.0.1` — un `curl` da locale sul router va indirizzato all'IP LAN, non
 al loopback.
 
+## 6. Dal player vuoto al catalogo canali reale (Broadpeak nanoCDN)
+
+Un xupnpd appena installato è un player UPnP/DLNA senza contenuti: serve un
+catalogo canali. Su questo operatore quel catalogo non è una playlist
+statica: è generato in tempo reale dallo stesso stack Broadpeak nanoCDN
+(`nanocdn-core`/`nanocdn-rr`, vedi
+[`NETWORK-SECURITY-IT.md`](NETWORK-SECURITY-IT.md) §7) che il router usa già
+per il decoder ufficiale dell'operatore.
+
+### 6.1 Il formato del catalogo live
+
+`nanocdn-core` riceve sullo stesso control channel multicast documentato in
+§7 (`239.200.0.0:5004`, sulla VLAN IPTV dedicata) un elenco testuale,
+aggiornato periodicamente, con righe in questo schema:
+
+```
+<host-cdn-origine>/<path-canale>;mi=<ip-multicast>&mp=<porta>&sri=<nome-flusso>&...&rto=<timeout>
+```
+
+`host-cdn-origine` è un hostname della CDN interna dell'operatore (dominio
+del tipo `*.cb.<cdn-operatore>.it`, oppure un dominio di terze parti per
+contenuti in partnership con provider esterni), `mi`/`mp` sono
+indirizzo/porta del flusso multicast corrispondente, `sri` un identificativo
+di sessione. Questi parametri hanno una finestra di validità breve: un
+catalogo non aggiornato produce entry che raggiungono davvero la CDN
+dell'operatore ma rispondono 404, perché quella sessione specifica non
+esiste più.
+
+Un piccolo script che tiene d'occhio quel file e lo traduce in una playlist
+M3U (una riga `#EXTINF` più l'URL origine, verbatim) copre il caso semplice:
+basta referenziarla nella tabella `playlist={}` del
+[`xupnpd.lua.example`](xupnpd-iptv/xupnpd.lua.example) di questo repo. Il
+punto delicato è che va rigenerata di continuo, non letta una volta sola al
+boot.
+
+### 6.2 Perché quegli URL non funzionano out-of-the-box
+
+Gli hostname del catalogo appartengono alla CDN dell'operatore, raggiungibile
+pubblicamente su Internet. Sul decoder ufficiale dell'operatore, questi
+stessi hostname vengono risolti localmente all'IP del router tramite
+una voce DNS dedicata (`dnsmasq`), invece che verso Internet: il router
+stesso li serve tramite il modulo "Request Router" di nanoCDN
+(`nanocdn-rr`), che si comporta come un proxy HTTP basato sull'header
+`Host:` della richiesta — se combacia con un hostname CDN noto, risponde
+dal buffer multicast locale, altrimenti inoltra la richiesta alla vera CDN.
+
+Per usare xupnpd allo stesso modo (dato che gira anch'esso sul router)
+serve replicare la stessa voce DNS locale per gli hostname del catalogo, più
+una regola NAT che indirizzi le richieste HTTP verso la porta reale su cui
+ascolta `nanocdn-rr` (vedi l'aggiornamento in
+[`NETWORK-SECURITY-IT.md`](NETWORK-SECURITY-IT.md) §7 sulla vera porta,
+diversa da quella nel file di config) — sia sul traffico proveniente dalla
+LAN sia su quello generato dal router stesso, dato che xupnpd fa la
+richiesta HTTP server-side in locale.
+
+### 6.3 Insidia di versione: config più nuovo del binario
+
+Se si tenta di far ripartire `nanocdn-rr` con il file di configurazione
+condiviso attuale (`--conf`), è plausibile un fallimento di bind totale (vedi
+l'aggiornamento in §7 di [`NETWORK-SECURITY-IT.md`](NETWORK-SECURITY-IT.md)):
+il config viene aggiornato da remoto dall'operatore (canale ACS/CWMP, già
+documentato in questo repo), mentre il binario installato sul firmware resta
+fermo alla versione con cui il router è stato rootato — un disallineamento
+che si manifesta con opzioni `rr-*` sconosciute nei log. In quel caso
+l'unico modo osservato per riportarlo in uno stato funzionante è avviarlo
+senza `--conf` (sui default compilati): si perdono le impostazioni avanzate
+del file, ma il relay HTTP di base — quello che serve a xupnpd — torna
+operativo.
+
 ## Passi successivi (non coperti qui)
 
-- Caricare una playlist M3U dei canali via la UI web
-  (`http://<router-ip>:4044/ui/`).
 - Configurare un client UPnP/DLNA sul dispositivo che deve riprodurre i
   canali (es. BubbleUPnP o VLC su Fire TV Stick).
