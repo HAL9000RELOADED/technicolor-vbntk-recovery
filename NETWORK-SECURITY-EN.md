@@ -250,6 +250,40 @@ still stable and listening on `18081`, no more respawn-loop, no functional
 regression observed (the core IPTV-redirector role — the actually useful
 one — does not depend on `nanocdn-rr` being present).
 
+### Update (2026-09-12, second unit, same family) — `nanocdn-rr` observed running live: bind-fail cause reframed
+
+On a second unit of the same family (DGA4130/VBNT-K), `nanocdn-rr` was not
+crash-looping but **survived as an orphaned process** from an earlier boot,
+listening and **working** on TCP port **8000** — not `18081`/`18082` as in
+the shared config file. This made it possible to observe its real behavior
+for the first time when it does start successfully: it's a **transparent
+HTTP reverse proxy keyed on the request's `Host:` header** — when it matches
+one of the operator's CDN hostnames listed in `smartlib-conf`, it forwards
+the request to the real CDN (confirmed by `Via:` headers naming real
+operator backbone hosts in the response) or serves it from the local
+multicast buffer.
+
+Manually restarting it with the same shared `--conf` reproduces the bind
+failure identically (`ERROR could not bind to any interface`) — but the log,
+read in full, also shows `unknown option` for several directives **in its
+own namespace** (`rr-*` prefix, so not attributable to "the other binary" as
+hypothesized above), absent from any older build: a sign that the shared
+config file — updated remotely by the operator over the ACS/CWMP channel in
+§2 — is now written for a newer Broadpeak protocol/schema version than the
+binary installed on this firmware understands. Started instead **with no
+config file at all** (compiled-in defaults), the bind on `0.0.0.0:8000`
+always succeeds, and the relay works as described above.
+
+This doesn't rule out the original hypothesis (bind-race on the multicast
+control channel shared with `nanocdn-core`) as a contributing cause — the
+specific test wasn't repeated on this second unit — but it adds a concrete,
+reproducible factor: the config/binary version mismatch. The fix already
+documented above (removing the instance from `/etc/init.d/nanocdn`) remains
+valid as a stability measure; for anyone who actually needs `nanocdn-rr`'s
+HTTP relay (useful e.g. for third-party UPnP/DLNA bridges, see
+[`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) §6), the only mode observed working
+is starting it standalone, without `--conf`.
+
 ## 8. ⚠️ `wifi-nurse-modal.lp` is not a safe read-only GET (Observed, 2026-09-09)
 
 A plain `GET /modals/wifi-nurse-modal.lp` was observed, on this same class of
@@ -402,6 +436,11 @@ premises.
   string analysis established that `SetNewLiveChannel` is an internal C
   library function (not a network endpoint) and mapped the real HTTP surface
   (`/QualityLevels(`, `/Fragments(`, `/nservices/metricsReceiver`, etc.).
+  **Advanced further** (§7 update, 2026-09-12, second unit): confirmed
+  `nanocdn-rr` (not `BkStbA` directly) actually reaching the operator's CDN
+  for a live channel-catalog entry, proving the HTTP relay mechanism
+  end-to-end — actually playing a channel remains unreached in the test (the
+  catalog session had expired by the time of the attempt).
 - The exact internal cause of `wifi-nurse-modal.lp`'s config-write side effect
   (§8) — under what conditions it triggers, and whether it can be reproduced
   deliberately — was not isolated further; observed once, empirically, not

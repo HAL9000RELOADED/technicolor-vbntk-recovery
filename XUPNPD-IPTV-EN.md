@@ -115,9 +115,72 @@ Note: the service binds to the LAN bridge's IP (`br-lan`), not
 `127.0.0.1` — a local `curl` on the router itself needs to target the LAN
 IP, not loopback.
 
+## 6. From an empty player to the operator's real channel catalog (Broadpeak nanoCDN)
+
+A freshly installed xupnpd is a UPnP/DLNA player with no content: it needs a
+channel catalog. On this operator that catalog is not a static playlist: it
+is generated live by the same Broadpeak nanoCDN stack
+(`nanocdn-core`/`nanocdn-rr`, see
+[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md) §7) the router already
+runs for the operator's own official decoder.
+
+### 6.1 The live catalog format
+
+`nanocdn-core` receives, on the same multicast control channel documented in
+§7 (`239.200.0.0:5004`, on the dedicated IPTV VLAN), a plain-text list,
+refreshed periodically, with lines shaped like this:
+
+```
+<origin-cdn-host>/<channel-path>;mi=<multicast-ip>&mp=<port>&sri=<stream-name>&...&rto=<timeout>
+```
+
+`origin-cdn-host` is a hostname on the operator's own internal CDN (a domain
+like `*.cb.<operator-cdn>.it`, or a third-party domain for content delivered
+under partnership with an external provider), `mi`/`mp` are the matching
+multicast stream's address/port, `sri` a session identifier. These
+parameters have a short validity window: a stale catalog produces entries
+that genuinely reach the operator's CDN but answer 404, because that
+specific session no longer exists.
+
+A small script that watches that file and turns it into an M3U playlist (one
+`#EXTINF` line plus the origin URL, verbatim) covers the simple case — just
+reference it in the `playlist={}` table of this repo's
+[`xupnpd.lua.example`](xupnpd-iptv/xupnpd.lua.example). The tricky part is
+that it needs to be **regenerated continuously**, not read once at boot.
+
+### 6.2 Why those URLs don't work out of the box
+
+The catalog's hostnames belong to the operator's CDN, publicly reachable
+over the Internet. On the operator's own official decoder, those same
+hostnames are resolved locally to the router's own IP via a dedicated DNS
+entry (`dnsmasq`), instead of going out to the Internet: the router itself
+then serves them through nanoCDN's "Request Router" module (`nanocdn-rr`),
+which behaves like an HTTP proxy keyed on the request's `Host:` header — if
+it matches a known CDN hostname, it answers from the local multicast buffer,
+otherwise it forwards the request to the real CDN.
+
+To use xupnpd the same way (since it also runs on the router), the same
+local DNS entry needs to be replicated for the catalog's hostnames, plus a
+NAT rule that steers HTTP requests to the real port `nanocdn-rr` listens on
+(see the update in [`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md) §7 on
+the real port, different from the one in the config file) — covering both
+traffic coming from the LAN and traffic the router itself generates, since
+xupnpd issues the HTTP request server-side, locally.
+
+### 6.3 Version pitfall: newer config than the binary
+
+Trying to restart `nanocdn-rr` with the current shared config file
+(`--conf`) can plausibly cause a total bind failure (see the update in §7 of
+[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md)): the config gets updated
+remotely by the operator (ACS/CWMP channel, already documented in this
+repo), while the binary installed on the firmware stays at whatever version
+the router was rooted with — a mismatch that shows up as unrecognized
+`rr-*` options in the logs. In that case the only way observed to bring it
+back to a working state is starting it **without** `--conf` (on its
+compiled-in defaults): the file's advanced settings are lost, but the basic
+HTTP relay — the part xupnpd actually needs — comes back up.
+
 ## Next steps (not covered here)
 
-- Upload a channel M3U playlist via the web UI
-  (`http://<router-ip>:4044/ui/`).
 - Set up a UPnP/DLNA client on the device that will play the channels (e.g.
   BubbleUPnP or VLC on a Fire TV Stick).

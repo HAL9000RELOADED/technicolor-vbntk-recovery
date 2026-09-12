@@ -25,8 +25,8 @@
 - [`AGTEF-1.1.3-UNOFFICIAL-EN.md`](AGTEF-1.1.3-UNOFFICIAL-EN.md) — comparison with the **unofficial** 1.1.3 build (root pre-enabled), derived from 1.0.3 — not an official release
 - [`UART-BOOT-LOG-IT.md`](UART-BOOT-LOG-IT.md) — trascrizione commentata di un boot seriale reale (Boot ROM, CFE, kernel Linux, recovery BOOTP/TFTP) con spiegazione dei checkpoint a 4 caratteri
 - [`UART-BOOT-LOG-EN.md`](UART-BOOT-LOG-EN.md) — annotated transcript of a real serial boot (Boot ROM, CFE, Linux kernel, BOOTP/TFTP recovery) with the 4-character checkpoints explained
-- [`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) — bug del flag "installato" nell'App Store modgui, feed pacchetti morto, compilazione da sorgente (toolchain armel soft-float statico) e deploy di xupnpd (relay UPnP/DLNA IPTV)
-- [`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) — modgui App Store "installed"-flag bug, dead package feed, from-source build (static armel soft-float toolchain) and deploy of xupnpd (UPnP/DLNA IPTV relay)
+- [`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) — bug del flag "installato" nell'App Store modgui, feed pacchetti morto, compilazione da sorgente (toolchain armel soft-float statico), deploy di xupnpd (relay UPnP/DLNA IPTV) e come collegarlo al catalogo canali live dell'operatore (Broadpeak nanoCDN)
+- [`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) — modgui App Store "installed"-flag bug, dead package feed, from-source build (static armel soft-float toolchain), xupnpd deploy (UPnP/DLNA IPTV relay), and wiring it to the operator's live channel catalog (Broadpeak nanoCDN)
 
 ## Contents / Contenuto
 
