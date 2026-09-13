@@ -124,6 +124,41 @@ is generated live by the same Broadpeak nanoCDN stack
 [`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md) §7) the router already
 runs for the operator's own official decoder.
 
+### 6.0 Overall architecture
+
+```mermaid
+sequenceDiagram
+    participant C as Client (VLC/DASH player)
+    participant RR as Request Router<br/>nanocdn-rr :8443 (TLS)
+    participant CORE as Core<br/>nanocdn-core :18443 (TLS)
+    participant CDN as Operator's public CDN (*.cb.ticdn.it, interbusiness.it)
+
+    C->>RR: GET /Content/DASH/Live/channel(...)/manifest.mpd?us=timlivetu0.cb.ticdn.it
+    RR-->>C: 302 Location: https://<local-hostname>:18443/[live_xxxx_001]/.../manifest.mpd
+    C->>CORE: GET /[live_xxxx_001]/.../manifest.mpd
+    CORE-->>C: 200 OK — live DASH manifest (MPD)
+    C->>CORE: GET /[live_xxxx_001]/.../..._init.m4i
+    CORE-->>C: 200 OK — init segment served locally
+    C->>CORE: GET /[live_xxxx_001]/.../..._Segment-<t>.m4v
+    CORE-->>C: 307 Location: https://timlivetu0.cb.ticdn.it/.../Segment-<t>.m4v
+    C->>CDN: GET .../Segment-<t>.m4v (client's own Internet connection)
+    CDN-->>C: 200 OK — real video bytes (header Via: cdn.interbusiness.it)
+```
+
+Key points from the diagram:
+
+- The router (Request Router + Core) is only involved for the manifest and
+  the init segment — never for the heavy video-segment bytes, which are
+  always a direct client↔public-CDN hop.
+- The two chained TLS hops (`:8443` then `:18443`, both on the same router)
+  are this architecture's main latency cost — relevant on a consumer-grade
+  ARM router CPU, see §6.4.
+- If the channel genuinely has an active multicast stream at that moment
+  (not guaranteed: depends on the operator's schedule, see §6.5), the Core
+  can answer segment requests from its own local buffer instead of
+  redirecting to the CDN — the client doesn't need to tell the two cases
+  apart, the protocol is identical either way.
+
 ### 6.1 The live catalog format
 
 `nanocdn-core` receives, on the same multicast control channel documented in
@@ -155,33 +190,44 @@ catalog's hostnames directly, and that resolving them locally to the
 router's own IP is enough to intercept them. **It isn't.** Verified live
 (by capturing detailed application logs on both the router side and the
 player side) that the official decoder/app instead contacts a **fixed
-hostname**, the same one regardless of channel — already present in the
-operator's own stock firmware as a "local hostname" entry of its own
-`dnsmasq` (the same mechanism the router uses to answer to its own
-management name, e.g. `dsldevice`), but **never exposed on the DNS resolver
-LAN clients actually query** (on this unit that's a third-party resolver
-the user installed, not `dnsmasq` — always verify with `netstat -tlnp |
-grep :53` who really answers on the LAN IP before assuming a DNS entry
-"already exists and works").
+hostname, identical for every channel**: `localdevice.abrstream.tech`. This
+isn't a custom domain specific to this install — it's already present in
+the operator's own stock firmware as a "local hostname" entry of its own
+`dnsmasq` (`list hostname 'localdevice.abrstream.tech'` in
+`/etc/config/dhcp`, the same mechanism the router uses to answer to its own
+management name, e.g. `dsldevice`), but on this unit it was **never exposed
+on the DNS resolver LAN clients actually query** (here that's a
+third-party resolver the user installed, not `dnsmasq` — always verify with
+`netstat -tlnp | grep :53` who really answers on the LAN IP before assuming
+a DNS entry "already exists and works").
 
-The request must be made over **HTTPS**, on the Request Router's SSL port
-(library default: **8443**), with a `us=<origin-hostname>` query parameter
-stating WHICH catalog hostname is being targeted — the `Host:` header alone
-is not enough, `us=` is required explicitly. The Request Router replies
-with a `302` redirect to `nanocdn-core` itself, on ITS OWN SSL port
-(default `18443`), with a path tagged by a freshly generated session id;
-from there the live manifest is served locally, and individual segment
-requests are themselves redirected (`307`) to the original public CDN
-hostname — which the **client** reaches with its own Internet connection,
-not the router.
+The request must be made over **HTTPS to that hostname**, on the Request
+Router's SSL port (library default: **8443**), with a
+`us=<channel-origin-hostname>` query parameter stating WHICH catalog
+hostname is being targeted — the `Host:` header alone is not enough, `us=`
+is required explicitly. The Request Router replies with a `302` redirect
+to `nanocdn-core` itself, on ITS OWN SSL port (default `18443`, same
+hostname), with a path tagged by a freshly generated session id; from there
+the live manifest is served locally, and individual segment requests are
+themselves redirected (`307`) to the original public CDN hostname — which
+the **client** reaches with its own Internet connection, not the router.
 
 In practice, for each catalog line (format described in §6.1: everything
 before the first `;` is the original host+path+query, the rest is internal
 multicast metadata), the useful URL for a generic player becomes:
 
 ```
-https://<operator's-fixed-hostname>:8443/<channel-path>[?original-query]&us=<channel-origin-host>
+https://localdevice.abrstream.tech:8443/<channel-path>[?original-query]&us=<channel-origin-host>
 ```
+
+Concrete example, free/promotional channel (catalog line:
+`timlivetu0.cb.ticdn.it/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd;mi=...`):
+
+```
+https://localdevice.abrstream.tech:8443/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd?us=timlivetu0.cb.ticdn.it
+```
+
+See §6.6 for this example's full live-captured request/response trace.
 
 ### 6.3 Correction: not a config/binary version mismatch, a port conflict
 
@@ -260,6 +306,87 @@ multicast catalog only carries channel/session identifiers, never the
 credential a paid content provider's own CDN requires. Free/promotional
 channels work fine through this mechanism; paid ones don't, and no
 workaround at this layer is known.
+
+### 6.6 End-to-end worked example (live-captured trace, free channel)
+
+Initial request to the Request Router:
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:8443/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd?us=timlivetu0.cb.ticdn.it"
+
+HTTP/1.1 302 Moved Temporarily
+Access-Control-Allow-Origin:*
+Access-Control-Expose-Headers: Location, X-BPK-ERROR
+Location: https://localdevice.abrstream.tech:18443/[live_316674ea_6aa5cded_026]/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd
+```
+
+The client follows the redirect to the Core, on its SSL port:
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:18443/[live_316674ea_6aa5cded_026]/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd"
+
+HTTP/1.1 200 OK
+Content-Type: application/dash+xml
+Via: http/1.1 se-mi1-17.cdn.interbusiness.it (), http/1.1 se-mo1-4.cdn.interbusiness.it ()
+
+<?xml version="1.0" encoding="UTF-8" ?>
+<MPD profiles="urn:mpeg:dash:profile:isoff-live:2011" type="dynamic"
+     minimumUpdatePeriod="PT1.92S" suggestedPresentationDelay="PT1.92S"
+     timeShiftBufferDepth="PT2M" ...>
+  <Period start="PT0S" id="1">
+    <AdaptationSet mimeType="video/mp4" ...>
+      <SegmentTemplate timescale="10000000"
+          media="$RepresentationID$_Segment-$Time$.m4v"
+          initialization="$RepresentationID$_init.m4i">
+        <SegmentTimeline><S t="53175241878241" d="19200000" r="62" /></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation width="1920" height="1080" bandwidth="7000000" id="...item-08item" />
+      <!-- 7 more renditions, from 384x216/350kbps to 1920x1080/7Mbps -->
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" ...>
+      <Representation audioSamplingRate="48000" bandwidth="191000" id="...item-09item" />
+    </AdaptationSet>
+  </Period>
+</MPD>
+```
+
+The `Via:` header shows the manifest genuinely comes from the operator's
+own backbone (`cdn.interbusiness.it`), not a static local buffer — direct
+proof the real-CDN fetch/relay works when done the right way.
+
+Init segment (served locally by the Core, no redirect):
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:18443/[live_..._026]/Content/DASH/Live/channel(timvisionpromo1)/...item-08item_init.m4i"
+
+HTTP/1.1 200 OK
+Content-Type: video/mp4
+Cache-Control: max-age=3600, public
+```
+
+Real video segment (redirected to the public CDN, the client downloads it
+with its own Internet connection):
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:18443/[live_..._026]/.../...item-08item_Segment-53175241878241.m4v"
+
+HTTP/1.1 307 Temporary Redirect
+Location: https://timlivetu0.cb.ticdn.it/Content/DASH/Live/channel(timvisionpromo1)/...item-08item_Segment-53175241878241.m4v
+```
+
+Counter-example: same request scheme, but on a paid channel — the Core
+(§6.5) forwards the request to the real content provider, which rejects it
+for lacking a valid subscription token:
+
+```
+$ curl -sk "https://localdevice.abrstream.tech:8443/.../stream.mpd?us=dca-tm-livedazn.dazn.ticdn.it&channel=5067&outlet=dazn-italy" -D -
+
+HTTP/1.1 503 Service Unavailable
+X-BPK-ERROR: 3601 - Unicast server replies an error without explanation
+```
+
+(in the Core's own application log, the real upstream error is visible in
+full: `httpc reply error: 401`).
 
 ## Next steps (not covered here)
 
