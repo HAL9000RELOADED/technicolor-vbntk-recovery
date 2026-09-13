@@ -124,6 +124,41 @@ is generated live by the same Broadpeak nanoCDN stack
 [`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md) §7) the router already
 runs for the operator's own official decoder.
 
+### 6.0 Overall architecture
+
+```mermaid
+sequenceDiagram
+    participant C as Client (VLC/DASH player)
+    participant RR as Request Router<br/>nanocdn-rr :8443 (TLS)
+    participant CORE as Core<br/>nanocdn-core :18443 (TLS)
+    participant CDN as Operator's public CDN (*.cb.ticdn.it, interbusiness.it)
+
+    C->>RR: GET /Content/DASH/Live/channel(...)/manifest.mpd?us=timlivetu0.cb.ticdn.it
+    RR-->>C: 302 Location: https://<local-hostname>:18443/[live_xxxx_001]/.../manifest.mpd
+    C->>CORE: GET /[live_xxxx_001]/.../manifest.mpd
+    CORE-->>C: 200 OK — live DASH manifest (MPD)
+    C->>CORE: GET /[live_xxxx_001]/.../..._init.m4i
+    CORE-->>C: 200 OK — init segment served locally
+    C->>CORE: GET /[live_xxxx_001]/.../..._Segment-<t>.m4v
+    CORE-->>C: 307 Location: https://timlivetu0.cb.ticdn.it/.../Segment-<t>.m4v
+    C->>CDN: GET .../Segment-<t>.m4v (client's own Internet connection)
+    CDN-->>C: 200 OK — real video bytes (header Via: cdn.interbusiness.it)
+```
+
+Key points from the diagram:
+
+- The router (Request Router + Core) is only involved for the manifest and
+  the init segment — never for the heavy video-segment bytes, which are
+  always a direct client↔public-CDN hop.
+- The two chained TLS hops (`:8443` then `:18443`, both on the same router)
+  are this architecture's main latency cost — relevant on a consumer-grade
+  ARM router CPU, see §6.4.
+- If the channel genuinely has an active multicast stream at that moment
+  (not guaranteed: depends on the operator's schedule, see §6.5), the Core
+  can answer segment requests from its own local buffer instead of
+  redirecting to the CDN — the client doesn't need to tell the two cases
+  apart, the protocol is identical either way.
+
 ### 6.1 The live catalog format
 
 `nanocdn-core` receives, on the same multicast control channel documented in
@@ -148,37 +183,210 @@ reference it in the `playlist={}` table of this repo's
 [`xupnpd.lua.example`](xupnpd-iptv/xupnpd.lua.example). The tricky part is
 that it needs to be **regenerated continuously**, not read once at boot.
 
-### 6.2 Why those URLs don't work out of the box
+### 6.2 The real endpoint official clients use: a fixed hostname + a "us=" parameter
 
-The catalog's hostnames belong to the operator's CDN, publicly reachable
-over the Internet. On the operator's own official decoder, those same
-hostnames are resolved locally to the router's own IP via a dedicated DNS
-entry (`dnsmasq`), instead of going out to the Internet: the router itself
-then serves them through nanoCDN's "Request Router" module (`nanocdn-rr`),
-which behaves like an HTTP proxy keyed on the request's `Host:` header — if
-it matches a known CDN hostname, it answers from the local multicast buffer,
-otherwise it forwards the request to the real CDN.
+A reasonable but wrong first guess: that the official decoder requests the
+catalog's hostnames directly, and that resolving them locally to the
+router's own IP is enough to intercept them. **It isn't.** Verified live
+(by capturing detailed application logs on both the router side and the
+player side) that the official decoder/app instead contacts a **fixed
+hostname, identical for every channel**: `localdevice.abrstream.tech`. This
+isn't a custom domain specific to this install — it's already present in
+the operator's own stock firmware as a "local hostname" entry of its own
+`dnsmasq` (`list hostname 'localdevice.abrstream.tech'` in
+`/etc/config/dhcp`, the same mechanism the router uses to answer to its own
+management name, e.g. `dsldevice`), but on this unit it was **never exposed
+on the DNS resolver LAN clients actually query** (here that's a
+third-party resolver the user installed, not `dnsmasq` — always verify with
+`netstat -tlnp | grep :53` who really answers on the LAN IP before assuming
+a DNS entry "already exists and works").
 
-To use xupnpd the same way (since it also runs on the router), the same
-local DNS entry needs to be replicated for the catalog's hostnames, plus a
-NAT rule that steers HTTP requests to the real port `nanocdn-rr` listens on
-(see the update in [`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md) §7 on
-the real port, different from the one in the config file) — covering both
-traffic coming from the LAN and traffic the router itself generates, since
-xupnpd issues the HTTP request server-side, locally.
+The request must be made over **HTTPS to that hostname**, on the Request
+Router's SSL port (library default: **8443**), with a
+`us=<channel-origin-hostname>` query parameter stating WHICH catalog
+hostname is being targeted — the `Host:` header alone is not enough, `us=`
+is required explicitly. The Request Router replies with a `302` redirect
+to `nanocdn-core` itself, on ITS OWN SSL port (default `18443`, same
+hostname), with a path tagged by a freshly generated session id; from there
+the live manifest is served locally, and individual segment requests are
+themselves redirected (`307`) to the original public CDN hostname — which
+the **client** reaches with its own Internet connection, not the router.
 
-### 6.3 Version pitfall: newer config than the binary
+In practice, for each catalog line (format described in §6.1: everything
+before the first `;` is the original host+path+query, the rest is internal
+multicast metadata), the useful URL for a generic player becomes:
 
-Trying to restart `nanocdn-rr` with the current shared config file
-(`--conf`) can plausibly cause a total bind failure (see the update in §7 of
-[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md)): the config gets updated
-remotely by the operator (ACS/CWMP channel, already documented in this
-repo), while the binary installed on the firmware stays at whatever version
-the router was rooted with — a mismatch that shows up as unrecognized
-`rr-*` options in the logs. In that case the only way observed to bring it
-back to a working state is starting it **without** `--conf` (on its
-compiled-in defaults): the file's advanced settings are lost, but the basic
-HTTP relay — the part xupnpd actually needs — comes back up.
+```
+https://localdevice.abrstream.tech:8443/<channel-path>[?original-query]&us=<channel-origin-host>
+```
+
+Concrete example, free/promotional channel (catalog line:
+`timlivetu0.cb.ticdn.it/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd;mi=...`):
+
+```
+https://localdevice.abrstream.tech:8443/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd?us=timlivetu0.cb.ticdn.it
+```
+
+See §6.6 for this example's full live-captured request/response trace.
+
+### 6.3 Correction: not a config/binary version mismatch, a port conflict
+
+An earlier investigation in this repo (see §7 of
+[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md)) attributed
+`nanocdn-rr`'s bind failure with `--conf` to a mismatch between the config
+version (updated remotely via ACS/CWMP) and the installed binary's version.
+**Digging further, that theory turned out to be wrong.** The real cause is
+a plain **port conflict**: with `ssl-enabled=1` (always present in the
+shared config), `nanocdn-rr` tries to bind its default HTTPS port
+(**8443**), which on an install with an nginx-based admin GUI often
+coincides with a port already used by the GUI's own
+"assistance"/remote-management mode.
+
+The dozens of `unknown option` lines in the logs remain cross-binary noise
+(each binary logs the other's options, present in the same shared file),
+not the cause of the failure.
+
+**Verified fix**: move the conflicting service (in the case observed, the
+nginx assistance GUI) to a different port, freeing up 8443 for
+`nanocdn-rr`; then restart it with the **full original config**
+(no need to strip the SSL lines — a free port was all it took), setting
+`ssl-allow-self-signed-cert=1` since no real operator-issued certificate is
+available locally under `ssl-auth-path` — without this the SSL bind still
+fails for lack of a valid certificate. The Request Router generates an
+on-the-fly self-signed certificate acceptable to most players (VLC accepts
+it with no extra configuration; browsers show a one-time security warning
+to confirm on that domain).
+
+### 6.4 Session stability: max bitrate and inactivity timeout
+
+With the correct endpoint (§6.2) working, two symptoms tied to nanoCDN's
+internal session bookkeeping show up, both fixable via configuration:
+
+A live (DASH/HLS) player reloads its manifest every few seconds to stay
+close to the live edge. **Every manifest reload through the Request Router
+mints a brand-new session on the Core**, while the player keeps downloading
+video segments referencing the previous session's id for a while. This
+produces two possible failure modes depending on how
+`max-output-bitrate` and `inactive-sessions-timeout` (core section of the
+config file) are set:
+
+- **Timeout too long / max bitrate too low**: the "ghost" sessions created
+  on every manifest refresh all stay "active" for the timeout's duration,
+  and the sum of the max bitrate each one reserves (even though no real
+  video byte ever actually crosses the router, since segments are always
+  redirected to the public CDN for channels with no active multicast
+  buffer) quickly exceeds the configured ceiling — the Request Router then
+  rejects **every** new request with an explicit "bitrate too high"-style
+  error, until the old sessions expire.
+- **Timeout too short** (e.g. lowered to fight the symptom above): the
+  previous session, the one the player is still downloading segments from,
+  gets closed server-side ("reconnect timeout") before the player finishes
+  consuming it. The player detects the resulting HTTP error and correctly
+  reloads the manifest from scratch, but the new session's timeline
+  reference doesn't line up smoothly with the one that just got cut off —
+  a compliant player notices this (a buffer timestamp that looks "too
+  old"), discards everything and restarts buffering from zero: visible as
+  a full playback stop/restart every one to a few minutes.
+
+**Fix**: raise **both** values together, not just one. A much higher max
+bitrate ceiling than the factory default (that quota is sized for a box
+that's the sole real video source, not one bouncing real playback off to
+the Internet) removes the first symptom; a generous inactivity timeout
+(well above the interval between a real player's manifest polls) removes
+the second, without bringing back the first thanks to the now amply
+sufficient bandwidth ceiling.
+
+### 6.5 Known limitation: paid content (authentication required)
+
+Channels that require a subscriber-level authentication token (not just an
+operator-internal channel/event identifier) always fail at the Core's own
+upstream fetch step with a `401 Unauthorized` from the real content
+provider's server, regardless of everything above: the operator's
+multicast catalog only carries channel/session identifiers, never the
+credential a paid content provider's own CDN requires. Free/promotional
+channels work fine through this mechanism; paid ones don't, and no
+workaround at this layer is known.
+
+### 6.6 End-to-end worked example (live-captured trace, free channel)
+
+Initial request to the Request Router:
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:8443/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd?us=timlivetu0.cb.ticdn.it"
+
+HTTP/1.1 302 Moved Temporarily
+Access-Control-Allow-Origin:*
+Access-Control-Expose-Headers: Location, X-BPK-ERROR
+Location: https://localdevice.abrstream.tech:18443/[live_316674ea_6aa5cded_026]/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd
+```
+
+The client follows the redirect to the Core, on its SSL port:
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:18443/[live_316674ea_6aa5cded_026]/Content/DASH/Live/channel(timvisionpromo1)/manifest.mpd"
+
+HTTP/1.1 200 OK
+Content-Type: application/dash+xml
+Via: http/1.1 se-mi1-17.cdn.interbusiness.it (), http/1.1 se-mo1-4.cdn.interbusiness.it ()
+
+<?xml version="1.0" encoding="UTF-8" ?>
+<MPD profiles="urn:mpeg:dash:profile:isoff-live:2011" type="dynamic"
+     minimumUpdatePeriod="PT1.92S" suggestedPresentationDelay="PT1.92S"
+     timeShiftBufferDepth="PT2M" ...>
+  <Period start="PT0S" id="1">
+    <AdaptationSet mimeType="video/mp4" ...>
+      <SegmentTemplate timescale="10000000"
+          media="$RepresentationID$_Segment-$Time$.m4v"
+          initialization="$RepresentationID$_init.m4i">
+        <SegmentTimeline><S t="53175241878241" d="19200000" r="62" /></SegmentTimeline>
+      </SegmentTemplate>
+      <Representation width="1920" height="1080" bandwidth="7000000" id="...item-08item" />
+      <!-- 7 more renditions, from 384x216/350kbps to 1920x1080/7Mbps -->
+    </AdaptationSet>
+    <AdaptationSet mimeType="audio/mp4" ...>
+      <Representation audioSamplingRate="48000" bandwidth="191000" id="...item-09item" />
+    </AdaptationSet>
+  </Period>
+</MPD>
+```
+
+The `Via:` header shows the manifest genuinely comes from the operator's
+own backbone (`cdn.interbusiness.it`), not a static local buffer — direct
+proof the real-CDN fetch/relay works when done the right way.
+
+Init segment (served locally by the Core, no redirect):
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:18443/[live_..._026]/Content/DASH/Live/channel(timvisionpromo1)/...item-08item_init.m4i"
+
+HTTP/1.1 200 OK
+Content-Type: video/mp4
+Cache-Control: max-age=3600, public
+```
+
+Real video segment (redirected to the public CDN, the client downloads it
+with its own Internet connection):
+
+```
+$ curl -sk -D - "https://localdevice.abrstream.tech:18443/[live_..._026]/.../...item-08item_Segment-53175241878241.m4v"
+
+HTTP/1.1 307 Temporary Redirect
+Location: https://timlivetu0.cb.ticdn.it/Content/DASH/Live/channel(timvisionpromo1)/...item-08item_Segment-53175241878241.m4v
+```
+
+Counter-example: same request scheme, but on a paid channel — the Core
+(§6.5) forwards the request to the real content provider, which rejects it
+for lacking a valid subscription token:
+
+```
+$ curl -sk "https://localdevice.abrstream.tech:8443/.../stream.mpd?us=dca-tm-livedazn.dazn.ticdn.it&channel=5067&outlet=dazn-italy" -D -
+
+HTTP/1.1 503 Service Unavailable
+X-BPK-ERROR: 3601 - Unicast server replies an error without explanation
+```
+
+(in the Core's own application log, the real upstream error is visible in
+full: `httpc reply error: 401`).
 
 ## Next steps (not covered here)
 

@@ -269,6 +269,33 @@ HTTP relay (useful e.g. for third-party UPnP/DLNA bridges, see
 [`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) §6), the only mode observed working
 is starting it standalone, without `--conf`.
 
+### Correction (2026-09-13) — it was never a version mismatch: a plain port conflict, fully resolved
+
+Digging further into the bind failure (prompted by the fact that the
+binaries on this unit were already the newest available for this
+firmware — ruling out "wait for an update" as an explanation), the
+version-mismatch theory above turned out to be wrong. The real cause: with
+`ssl-enabled=1` (always present in the shared config), `nanocdn-rr` tries
+to bind its default HTTPS port, **8443** — which on this unit's nginx-based
+admin GUI is already used by its own "assistance"/remote-management mode
+(`sessioncontrol.setManagerForPort("assistance", "8443")` in
+`nginx.conf`). The `unknown option` lines remain genuine cross-binary
+noise, not the cause.
+
+**Verified, persistent fix**: move the admin GUI's assistance listener off
+8443 (e.g. to 8444) to free the port, then run `nanocdn-rr` with the
+**full, unmodified shared config** — no need to strip anything — adding
+only `ssl-allow-self-signed-cert=1`, since no operator-issued certificate
+exists locally under `ssl-auth-path` and the SSL bind otherwise fails for
+lack of one. With the port free and a self-signed certificate allowed, the
+Request Router binds cleanly on 8443 and behaves exactly as described
+above (Host-header/`us=`-keyed relay to the operator's real CDN) — with
+**no loss of any config directive**, unlike the earlier no-`--conf`
+workaround. See [`XUPNPD-IPTV-EN.md`](XUPNPD-IPTV-EN.md) §6.2–6.4 for the
+full working request scheme (a fixed hostname + `us=` parameter, not the
+catalog hostnames directly) and the session/bitrate tuning needed for
+stable long-running playback.
+
 ## 8. ⚠️ `wifi-nurse-modal.lp` is not a safe read-only GET (Observed, 2026-09-09)
 
 A plain `GET /modals/wifi-nurse-modal.lp` was observed, on this same class of
