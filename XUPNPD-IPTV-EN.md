@@ -148,37 +148,118 @@ reference it in the `playlist={}` table of this repo's
 [`xupnpd.lua.example`](xupnpd-iptv/xupnpd.lua.example). The tricky part is
 that it needs to be **regenerated continuously**, not read once at boot.
 
-### 6.2 Why those URLs don't work out of the box
+### 6.2 The real endpoint official clients use: a fixed hostname + a "us=" parameter
 
-The catalog's hostnames belong to the operator's CDN, publicly reachable
-over the Internet. On the operator's own official decoder, those same
-hostnames are resolved locally to the router's own IP via a dedicated DNS
-entry (`dnsmasq`), instead of going out to the Internet: the router itself
-then serves them through nanoCDN's "Request Router" module (`nanocdn-rr`),
-which behaves like an HTTP proxy keyed on the request's `Host:` header — if
-it matches a known CDN hostname, it answers from the local multicast buffer,
-otherwise it forwards the request to the real CDN.
+A reasonable but wrong first guess: that the official decoder requests the
+catalog's hostnames directly, and that resolving them locally to the
+router's own IP is enough to intercept them. **It isn't.** Verified live
+(by capturing detailed application logs on both the router side and the
+player side) that the official decoder/app instead contacts a **fixed
+hostname**, the same one regardless of channel — already present in the
+operator's own stock firmware as a "local hostname" entry of its own
+`dnsmasq` (the same mechanism the router uses to answer to its own
+management name, e.g. `dsldevice`), but **never exposed on the DNS resolver
+LAN clients actually query** (on this unit that's a third-party resolver
+the user installed, not `dnsmasq` — always verify with `netstat -tlnp |
+grep :53` who really answers on the LAN IP before assuming a DNS entry
+"already exists and works").
 
-To use xupnpd the same way (since it also runs on the router), the same
-local DNS entry needs to be replicated for the catalog's hostnames, plus a
-NAT rule that steers HTTP requests to the real port `nanocdn-rr` listens on
-(see the update in [`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md) §7 on
-the real port, different from the one in the config file) — covering both
-traffic coming from the LAN and traffic the router itself generates, since
-xupnpd issues the HTTP request server-side, locally.
+The request must be made over **HTTPS**, on the Request Router's SSL port
+(library default: **8443**), with a `us=<origin-hostname>` query parameter
+stating WHICH catalog hostname is being targeted — the `Host:` header alone
+is not enough, `us=` is required explicitly. The Request Router replies
+with a `302` redirect to `nanocdn-core` itself, on ITS OWN SSL port
+(default `18443`), with a path tagged by a freshly generated session id;
+from there the live manifest is served locally, and individual segment
+requests are themselves redirected (`307`) to the original public CDN
+hostname — which the **client** reaches with its own Internet connection,
+not the router.
 
-### 6.3 Version pitfall: newer config than the binary
+In practice, for each catalog line (format described in §6.1: everything
+before the first `;` is the original host+path+query, the rest is internal
+multicast metadata), the useful URL for a generic player becomes:
 
-Trying to restart `nanocdn-rr` with the current shared config file
-(`--conf`) can plausibly cause a total bind failure (see the update in §7 of
-[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md)): the config gets updated
-remotely by the operator (ACS/CWMP channel, already documented in this
-repo), while the binary installed on the firmware stays at whatever version
-the router was rooted with — a mismatch that shows up as unrecognized
-`rr-*` options in the logs. In that case the only way observed to bring it
-back to a working state is starting it **without** `--conf` (on its
-compiled-in defaults): the file's advanced settings are lost, but the basic
-HTTP relay — the part xupnpd actually needs — comes back up.
+```
+https://<operator's-fixed-hostname>:8443/<channel-path>[?original-query]&us=<channel-origin-host>
+```
+
+### 6.3 Correction: not a config/binary version mismatch, a port conflict
+
+An earlier investigation in this repo (see §7 of
+[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md)) attributed
+`nanocdn-rr`'s bind failure with `--conf` to a mismatch between the config
+version (updated remotely via ACS/CWMP) and the installed binary's version.
+**Digging further, that theory turned out to be wrong.** The real cause is
+a plain **port conflict**: with `ssl-enabled=1` (always present in the
+shared config), `nanocdn-rr` tries to bind its default HTTPS port
+(**8443**), which on an install with an nginx-based admin GUI often
+coincides with a port already used by the GUI's own
+"assistance"/remote-management mode.
+
+The dozens of `unknown option` lines in the logs remain cross-binary noise
+(each binary logs the other's options, present in the same shared file),
+not the cause of the failure.
+
+**Verified fix**: move the conflicting service (in the case observed, the
+nginx assistance GUI) to a different port, freeing up 8443 for
+`nanocdn-rr`; then restart it with the **full original config**
+(no need to strip the SSL lines — a free port was all it took), setting
+`ssl-allow-self-signed-cert=1` since no real operator-issued certificate is
+available locally under `ssl-auth-path` — without this the SSL bind still
+fails for lack of a valid certificate. The Request Router generates an
+on-the-fly self-signed certificate acceptable to most players (VLC accepts
+it with no extra configuration; browsers show a one-time security warning
+to confirm on that domain).
+
+### 6.4 Session stability: max bitrate and inactivity timeout
+
+With the correct endpoint (§6.2) working, two symptoms tied to nanoCDN's
+internal session bookkeeping show up, both fixable via configuration:
+
+A live (DASH/HLS) player reloads its manifest every few seconds to stay
+close to the live edge. **Every manifest reload through the Request Router
+mints a brand-new session on the Core**, while the player keeps downloading
+video segments referencing the previous session's id for a while. This
+produces two possible failure modes depending on how
+`max-output-bitrate` and `inactive-sessions-timeout` (core section of the
+config file) are set:
+
+- **Timeout too long / max bitrate too low**: the "ghost" sessions created
+  on every manifest refresh all stay "active" for the timeout's duration,
+  and the sum of the max bitrate each one reserves (even though no real
+  video byte ever actually crosses the router, since segments are always
+  redirected to the public CDN for channels with no active multicast
+  buffer) quickly exceeds the configured ceiling — the Request Router then
+  rejects **every** new request with an explicit "bitrate too high"-style
+  error, until the old sessions expire.
+- **Timeout too short** (e.g. lowered to fight the symptom above): the
+  previous session, the one the player is still downloading segments from,
+  gets closed server-side ("reconnect timeout") before the player finishes
+  consuming it. The player detects the resulting HTTP error and correctly
+  reloads the manifest from scratch, but the new session's timeline
+  reference doesn't line up smoothly with the one that just got cut off —
+  a compliant player notices this (a buffer timestamp that looks "too
+  old"), discards everything and restarts buffering from zero: visible as
+  a full playback stop/restart every one to a few minutes.
+
+**Fix**: raise **both** values together, not just one. A much higher max
+bitrate ceiling than the factory default (that quota is sized for a box
+that's the sole real video source, not one bouncing real playback off to
+the Internet) removes the first symptom; a generous inactivity timeout
+(well above the interval between a real player's manifest polls) removes
+the second, without bringing back the first thanks to the now amply
+sufficient bandwidth ceiling.
+
+### 6.5 Known limitation: paid content (authentication required)
+
+Channels that require a subscriber-level authentication token (not just an
+operator-internal channel/event identifier) always fail at the Core's own
+upstream fetch step with a `401 Unauthorized` from the real content
+provider's server, regardless of everything above: the operator's
+multicast catalog only carries channel/session identifiers, never the
+credential a paid content provider's own CDN requires. Free/promotional
+channels work fine through this mechanism; paid ones don't, and no
+workaround at this layer is known.
 
 ## Next steps (not covered here)
 

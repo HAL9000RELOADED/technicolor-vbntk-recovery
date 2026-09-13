@@ -292,6 +292,37 @@ come misura di stabilità; per chi ha invece bisogno del relay HTTP di
 [`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) §6), l'unica modalità osservata
 funzionante è avviarlo a parte, senza `--conf`.
 
+### Correzione (2026-09-13) — non era mai stato un disallineamento di versione: un banale conflitto di porta, risolto del tutto
+
+Approfondendo ulteriormente il fallimento di bind (spinti dal fatto che i
+binari su questa unità erano già i più recenti disponibili per questo
+firmware — il che esclude "aspettare un aggiornamento" come spiegazione),
+la teoria del disallineamento di versione sopra si è rivelata sbagliata.
+La vera causa: con `ssl-enabled=1` (sempre presente nel config condiviso),
+`nanocdn-rr` prova a bindare la sua porta HTTPS di default, **8443** — che
+sulla GUI di amministrazione basata su nginx di questa unità è già usata
+dalla sua stessa modalità "assistenza"/gestione remota
+(`sessioncontrol.setManagerForPort("assistance", "8443")` in
+`nginx.conf`). Le righe `unknown option` restano genuino rumore
+incrociato tra i due binari, non la causa.
+
+**Fix verificato e persistente**: spostare il listener "assistenza" della
+GUI admin fuori dalla 8443 (es. su 8444) per liberare la porta, poi
+lanciare `nanocdn-rr` con la **config condivisa completa e non modificata**
+— non serve togliere nulla — aggiungendo solo
+`ssl-allow-self-signed-cert=1`, dato che nessun certificato rilasciato
+dall'operatore esiste localmente sotto `ssl-auth-path` e il bind SSL
+altrimenti fallisce per mancanza di uno. Con la porta libera e il
+self-signed abilitato, il Request Router binda correttamente sulla 8443 e
+si comporta esattamente come descritto sopra (relay verso la vera CDN
+dell'operatore chiavato su header Host/parametro `us=`) — **senza perdere
+nessuna direttiva del config**, a differenza del workaround precedente
+senza `--conf`. Vedi [`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) §6.2–6.4 per
+lo schema di richiesta completo realmente funzionante (un hostname fisso +
+parametro `us=`, non gli hostname del catalogo direttamente) e per la
+messa a punto di sessioni/bitrate necessaria per una riproduzione stabile
+e prolungata.
+
 ## 8. ⚠️ `wifi-nurse-modal.lp` non è una GET di sola lettura sicura
 
 Una semplice `GET /modals/wifi-nurse-modal.lp` è stata osservata, su questa
