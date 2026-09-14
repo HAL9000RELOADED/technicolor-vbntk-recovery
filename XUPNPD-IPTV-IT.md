@@ -191,19 +191,18 @@ boot.
 
 Un'ipotesi iniziale ragionevole ma sbagliata: che il decoder ufficiale
 richieda direttamente gli hostname del catalogo, e che basti risolverli
-localmente all'IP del router per intercettarli. **Non è così.** Verificato
-dal vivo (catturando log applicativi dettagliati sia lato router sia lato
-player) che il decoder/app ufficiale contatta invece un **hostname fisso e
+localmente all'IP del router per intercettarli. **Non è così.** che il 
+decoder/app ufficiale contatta invece un **hostname fisso e
 identico per tutti i canali**: `localdevice.abrstream.tech`. Non è un
 dominio custom di questa installazione — è già presente nel firmware
 originale dell'operatore come voce "hostname locale" del proprio `dnsmasq`
 (`list hostname 'localdevice.abrstream.tech'` in `/etc/config/dhcp`, lo
 stesso meccanismo con cui il router risponde al proprio nome di gestione,
 es. `dsldevice`), ma su questa unità **non era mai esposto sul resolver
-DNS che i client LAN interrogano davvero** (qui è un resolver di terze
-parti installato dall'utente, non `dnsmasq` — verificare sempre con
+DNS che i client LAN interrogano** (qui è un resolver di terze
+parti, non `dnsmasq` — verificare sempre con
 `netstat -tlnp | grep :53` chi risponde realmente sull'IP LAN prima di
-assumere che una voce DNS "esista già e funzioni").
+assumere che una voce DNS esista già e funzioni).
 
 La richiesta va fatta in **HTTPS verso quell'hostname**, sulla porta SSL
 del Request Router (default di libreria: **8443**), con un parametro
@@ -316,7 +315,7 @@ indipendentemente da tutto quanto sopra: il catalogo multicast
 dell'operatore porta solo identificativi di canale/sessione, mai le
 credenziali che la CDN del fornitore a pagamento richiede. I canali
 gratuiti/promozionali funzionano regolarmente con questo meccanismo; quelli
-a pagamento no, e non risulta un modo per aggirarlo a questo livello.
+a pagamento no.
 
 ### 6.6 Esempio pratico end-to-end (traccia reale, canale gratuito)
 
