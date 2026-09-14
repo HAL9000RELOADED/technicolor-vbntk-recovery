@@ -197,9 +197,9 @@ the operator's own stock firmware as a "local hostname" entry of its own
 `/etc/config/dhcp`, the same mechanism the router uses to answer to its own
 management name, e.g. `dsldevice`), but on this unit it was **never exposed
 on the DNS resolver LAN clients actually query** (here that's a
-third-party resolver the user installed, not `dnsmasq` — always verify with
-`netstat -tlnp | grep :53` who really answers on the LAN IP before assuming
-a DNS entry "already exists and works").
+third-party resolved installed, not `dnsmasq` — always verify with
+`netstat -tlnp | grep :53` who answers on the LAN IP before assuming
+a DNS entry already exists and works).
 
 The request must be made over **HTTPS to that hostname**, on the Request
 Router's SSL port (library default: **8443**), with a
@@ -229,13 +229,9 @@ https://localdevice.abrstream.tech:8443/Content/DASH/Live/channel(timvisionpromo
 
 See §6.6 for this example's full live-captured request/response trace.
 
-### 6.3 Correction: not a config/binary version mismatch, a port conflict
+### 6.3 Correction: a port conflict
 
-An earlier investigation in this repo (see §7 of
-[`NETWORK-SECURITY-EN.md`](NETWORK-SECURITY-EN.md)) attributed
-`nanocdn-rr`'s bind failure with `--conf` to a mismatch between the config
-version (updated remotely via ACS/CWMP) and the installed binary's version.
-**Digging further, that theory turned out to be wrong.** The real cause is
+The real cause is
 a plain **port conflict**: with `ssl-enabled=1` (always present in the
 shared config), `nanocdn-rr` tries to bind its default HTTPS port
 (**8443**), which on an install with an nginx-based admin GUI often
@@ -304,8 +300,7 @@ upstream fetch step with a `401 Unauthorized` from the real content
 provider's server, regardless of everything above: the operator's
 multicast catalog only carries channel/session identifiers, never the
 credential a paid content provider's own CDN requires. Free/promotional
-channels work fine through this mechanism; paid ones don't, and no
-workaround at this layer is known.
+channels work fine through this mechanism, paid ones don't.
 
 ### 6.6 End-to-end worked example (live-captured trace, free channel)
 
