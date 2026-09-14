@@ -292,7 +292,7 @@ come misura di stabilità; per chi ha invece bisogno del relay HTTP di
 [`XUPNPD-IPTV-IT.md`](XUPNPD-IPTV-IT.md) §6), l'unica modalità osservata
 funzionante è avviarlo a parte, senza `--conf`.
 
-### Correzione (2026-09-13) — non era mai stato un disallineamento di versione: un banale conflitto di porta, risolto del tutto
+### Correzione (2026-09-13) — Banale conflitto di porta, risolto
 
 Approfondendo ulteriormente il fallimento di bind (spinti dal fatto che i
 binari su questa unità erano già i più recenti disponibili per questo
