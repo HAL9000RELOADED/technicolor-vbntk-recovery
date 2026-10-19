@@ -28,7 +28,11 @@
     in caso di problemi).
 
 .PARAMETER ModemIp
-    IP del modem (default 192.168.1.1).
+    IP/hostname del modem (default 192.168.1.1).
+
+.PARAMETER SshPort
+    Porta SSH (default 22 - alcuni device espongono dropbear su una porta
+    WAN non standard, es. per un accesso da remoto via DDNS).
 
 .PARAMETER Username
 .PARAMETER Password
@@ -104,6 +108,7 @@
 [CmdletBinding()]
 param(
     [string]$ModemIp = "192.168.1.1",
+    [int]$SshPort = 22,
     [string]$Username = "root",
     [string]$Password = "root",
 
@@ -139,7 +144,7 @@ function New-ModemSession {
     # va accettata automaticamente ogni volta, non fissata una volta sola.
     $securePw = ConvertTo-SecureString $Password -AsPlainText -Force
     $cred = New-Object System.Management.Automation.PSCredential($Username, $securePw)
-    return New-SSHSession -ComputerName $ModemIp -Credential $cred -AcceptKey -Force -ErrorAction Stop
+    return New-SSHSession -ComputerName $ModemIp -Port $SshPort -Credential $cred -AcceptKey -Force -ErrorAction Stop
 }
 
 function Invoke-ModemCommand {
@@ -535,7 +540,7 @@ function Dump-ModemPartition {
 }
 
 try {
-    Write-Step "Dump memoria flash (MTD) - modem $ModemIp"
+    Write-Step "Dump memoria flash (MTD) - modem ${ModemIp}:${SshPort}"
     Ensure-PoshSSH
 
     if (-not (Test-Path $OutDir)) {
